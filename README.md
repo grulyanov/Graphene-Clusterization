@@ -11,6 +11,8 @@ This repository contains a project that represents the processing of experimenta
 - `Sequential RANSAC` &mdash; a method for searching for multiple linear correlations within the clusters
 - `Spectral clustering tuning` &mdash; an attempt to optimize the method to improve the clustering quality
 - `Plotly dashboard` &mdash; additional script for visualisation by `plotly`
+- 'Kamlet-Taft correlations' &mdash; analysis of infuence on sorption by Kamlet-Taft parameters
+- 'DN correlations' &mdash; analysis of infuence on sorption by Gutmann donor number parameters
 
 ## Conclusions 
 
@@ -34,3 +36,5 @@ It has the highest Silhouette score and the lowest Davies–Bouldin index, which
 - A pipeline based on RANSAC and Sequential RANSAC has been built to search for linear correlations within each cluster, which will allow us to make a scientific interpretation of the interactions of solvents with graphene oxide.
 
 - As an additional search for linear correlations, plotly dashboard was used, which returned regression equations with a minimum amount of code.
+
+- The Kamlet-Taft and DN correlations were analyzed
