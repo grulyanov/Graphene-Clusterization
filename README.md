@@ -11,8 +11,8 @@ This repository contains a project that represents the processing of experimenta
 - `Sequential RANSAC` &mdash; a method for searching for multiple linear correlations within the clusters
 - `Spectral clustering tuning` &mdash; an attempt to optimize the method to improve the clustering quality
 - `Plotly dashboard` &mdash; additional script for visualisation by `plotly`
-- 'Kamlet-Taft correlations' &mdash; analysis of infuence on sorption by Kamlet-Taft parameters
-- 'DN correlations' &mdash; analysis of infuence on sorption by Gutmann donor number parameters
+- `Kamlet-Taft correlations` &mdash; analysis of infuence on sorption by Kamlet-Taft parameters
+- `DN correlations` &mdash; analysis of infuence on sorption by Gutmann donor number parameters
 
 ## Conclusions 
 
