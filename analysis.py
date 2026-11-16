@@ -30,6 +30,8 @@ from sklearn.preprocessing import RobustScaler, StandardScaler
 
 warnings.filterwarnings('ignore')
 
+from i18n import t
+
 NAME = 'Name'
 SORPTION_MMOL = 'Sorption, mmol/g'
 
@@ -297,7 +299,7 @@ def contingency_test(a, b, n_mc=10000, seed=42):
     out['chi2'], out['chi2_p'] = float(chi2), float(p)
     if table.shape == (2, 2):
         out['fisher_p'] = float(stats.fisher_exact(table.values)[1])
-        out['fisher_kind'] = 'точный (2×2)'
+        out['fisher_kind'] = t('точный (2×2)', 'exact (2×2)')
     else:
         a_arr, b_arr = np.asarray(a), np.asarray(b)
         observed = _table_logprob(table.values)
@@ -312,7 +314,7 @@ def contingency_test(a, b, n_mc=10000, seed=42):
             if _table_logprob(t) <= observed + 1e-9:
                 count += 1
         out['fisher_p'] = (count + 1) / (n_mc + 1)
-        out['fisher_kind'] = f'Монте-Карло, {n_mc} перестановок'
+        out['fisher_kind'] = t(f'Монте-Карло, {n_mc} перестановок', f'Monte Carlo, {n_mc} permutations')
     return out
 
 
@@ -771,8 +773,10 @@ def analyze_descriptor(frame, descriptor, ycol=SORPTION_MMOL, *, min_fraction=0.
     result = {'data': data, 'missing': missing, 'min_inliers': min_inliers, 'models': [],
               'error': None}
     if len(data) < min_inliers or len(data) < 3:
-        result['error'] = (f'Для RANSAC по «{descriptor}» нужно не менее {min_inliers} веществ '
-                           f'со значением, сейчас {len(data)}.')
+        result['error'] = t(f'Для RANSAC по «{descriptor}» нужно не менее {min_inliers} веществ '
+                            f'со значением, сейчас {len(data)}.',
+                            f'RANSAC on "{descriptor}" needs at least {min_inliers} substances with a value; '
+                            f'now {len(data)}.')
         return result
     models, _ = sequential_ransac_fit(
         data[descriptor], data[ycol], threshold=threshold, n_iterations=n_iterations,
@@ -816,8 +820,10 @@ def ransac_plane(frame, x_col, y_col, z_col=SORPTION_MMOL, min_inliers=5, seed=4
     data = frame[[NAME, x_col, y_col, z_col]].dropna().sort_values(z_col, kind='mergesort').reset_index(drop=True)
     result = {'data': data, 'tuned': None, 'error': None}
     if len(data) < min_inliers:
-        result['error'] = (f'Для плоскости {x_col} – {y_col} нужно не менее {min_inliers} веществ '
-                           f'с обоими значениями, сейчас {len(data)}.')
+        result['error'] = t(f'Для плоскости {x_col} – {y_col} нужно не менее {min_inliers} веществ '
+                            f'с обоими значениями, сейчас {len(data)}.',
+                            f'Plane {x_col} – {y_col} needs at least {min_inliers} substances with both values; '
+                            f'now {len(data)}.')
         return result
     X_plane = data[[x_col, y_col]].to_numpy(float)
     z = data[z_col].to_numpy(float)
@@ -825,7 +831,7 @@ def ransac_plane(frame, x_col, y_col, z_col=SORPTION_MMOL, min_inliers=5, seed=4
                                             tau_grid=tau_grid, min_train_r2=min_train_r2,
                                             min_cv_r2=min_cv_r2, max_trials=max_trials)
     if tuned is None:
-        result['error'] = f'Не найдено проверенной плоскости для {x_col} и {y_col}.'
+        result['error'] = t(f'Не найдено проверенной плоскости для {x_col} и {y_col}.', f'No validated plane for {x_col} and {y_col}.')
         return result
     model = tuned['model']
     mask = model.inlier_mask_
@@ -891,8 +897,10 @@ def collinearity(frame, predictors, ycol=SORPTION_MMOL):
     data = data.dropna().reset_index(drop=True)
     out = {'data': data, 'missing': missing, 'error': None}
     if len(predictors) < 2 or len(data) < len(predictors) + 2:
-        out['error'] = (f'Для коллинеарности нужно хотя бы 2 дескриптора и не меньше '
-                        f'{len(predictors) + 2} веществ без пропусков, сейчас {len(data)}.')
+        out['error'] = t(f'Для коллинеарности нужно хотя бы 2 дескриптора и не меньше '
+                         f'{len(predictors) + 2} веществ без пропусков, сейчас {len(data)}.',
+                         f'Collinearity needs at least 2 descriptors and {len(predictors) + 2} complete '
+                         f'cases; now {len(data)}.')
         return out
     Xs = StandardScaler().fit_transform(data[list(predictors)].to_numpy(float))
     corr = data[list(predictors)].corr()
@@ -1054,8 +1062,9 @@ def pls_validation(frame, predictors, ycol=SORPTION_MMOL, seed=42):
     col = collinearity(frame, predictors, ycol)
     data = col['data']
     if len(predictors) < 1 or len(data) < max(6, len(predictors) + 2):
-        return {'error': (f'Для PLS нужно не меньше {max(6, len(predictors) + 2)} веществ без '
-                          f'пропусков в выбранных дескрипторах, сейчас {len(data)}.'),
+        return {'error': t(f'Для PLS нужно не меньше {max(6, len(predictors) + 2)} веществ без '
+                           f'пропусков в выбранных дескрипторах, сейчас {len(data)}.',
+                           f'PLS needs at least {max(6, len(predictors) + 2)} complete cases; now {len(data)}.'),
                 'data': data, 'missing': col['missing']}
     res = nested_loo_pls(data[list(predictors)].to_numpy(float), data[ycol].to_numpy(float), seed)
     table = data[[NAME, ycol] + list(predictors)].copy()

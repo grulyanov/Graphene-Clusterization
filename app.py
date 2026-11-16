@@ -341,7 +341,7 @@ def is_positive(descriptor):
         return True
     if mode.startswith('Не'):
         return False
-    return ds.meta[descriptor].get('positive') == 'да'
+    return ds.meta[descriptor].get('positive') == D.YES
 
 
 def ci_level():

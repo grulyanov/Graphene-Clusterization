@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software or data, please cite it as below."
+title: "Graphene oxide probe sorption explorer: interactive analysis of molecular-probe sorption on graphene oxide"
+type: software
+authors:
+  - family-names: Ulyanov
+    given-names: Grigory
+version: 1.0.0
+date-released: 2026-11-16
+license: MIT
+repository-code: "https://github.com/grulyanov/Graphene-Clusterization"
+url: "https://graphene-clusterization.streamlit.app/"
+keywords:
+  - graphene oxide
+  - sorption
+  - molecular probes
+  - Kamlet–Taft parameters
+  - donor number
+  - RANSAC
+  - clustering
+  - permutation test
+  - Streamlit
+abstract: >-
+  Interactive web application (Streamlit) for analysing the sorption of molecular probes on
+  graphene oxide. It reproduces the analysis notebook (k-means, hierarchical, spectral and
+  DBSCAN clustering; sequential RANSAC correlations of sorption with Kamlet–Taft parameters,
+  donor number, proton affinity and surface descriptors; RANSAC planes; collinearity
+  diagnostics; nested leave-one-out PLS; conditional and full permutation tests) on an editable
+  dataset, with substances and descriptors that can be added, edited and excluded. Russian
+  (app.py) and English (app_en.py) interfaces. Code: MIT; data: CC BY 4.0.

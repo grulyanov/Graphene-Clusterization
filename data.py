@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 import analysis as A
+from i18n import LANG, t
 
 ROOT = Path(__file__).resolve().parent
 EXCEL_PATH = ROOT / 'Graphene.xlsx'
@@ -26,32 +27,67 @@ SORPTION = A.SORPTION_MMOL
 SMILES = 'SMILES'
 EXCEL_M = 'Molar Masses, g/mol'
 EXCEL_GG = 'Sorption, g/g'
-M_COL = 'M, г/моль'
-RHO_COL = 'Плотность, г/см³'
-CLASS_COL = 'Химический класс'
-IR_COL = 'Класс ИК-отклика'
-INCLUDED = 'Включено'
-ADDED = 'Добавлено'
+M_COL = t('M, г/моль', 'M, g/mol')
+RHO_COL = t('Плотность, г/см³', 'Density, g/cm³')
+CLASS_COL = t('Химический класс', 'Chemical class')
+IR_COL = t('Класс ИК-отклика', 'IR response class')
+INCLUDED = t('Включено', 'Included')
+ADDED = t('Добавлено', 'Added')
 ROW_ID = 'ID'
 
 # Служебные числовые столбцы (не дескрипторы)
 SERVICE_NUMERIC = [EXCEL_M, EXCEL_GG, M_COL, RHO_COL]
 SERVICE_TEXT = [SMILES, CLASS_COL, IR_COL]
-IR_CLASSES = {'1': '1 — новые полосы (перенос протона / реакция)',
-              '2': '2 — только сдвиги полос (водородная связь)',
-              '3': '3 — нет отклика'}
+IR_CLASSES = {'1': t('1 — новые полосы (перенос протона / реакция)', '1 — new bands (proton transfer / reaction)'),
+              '2': t('2 — только сдвиги полос (водородная связь)', '2 — band shifts only (H-bonding)'),
+              '3': t('3 — нет отклика', '3 — no response')}
 
 UNITS = {
-    'mmol/g': {'title': 'ммоль/г', 'col': 'Sorption, mmol/g', 'axis': 'Sorption (mmol/g)',
+    'mmol/g': {'title': t('ммоль/г', 'mmol/g'), 'col': 'Sorption, mmol/g', 'axis': 'Sorption (mmol/g)',
                'short': 'mmol/g', 'tau_factor': 1.0},
-    'g/g': {'title': 'г/г', 'col': 'Sorption, g/g', 'axis': 'Sorption (g/g)',
+    'g/g': {'title': t('г/г', 'g/g'), 'col': 'Sorption, g/g', 'axis': 'Sorption (g/g)',
             'short': 'g/g', 'tau_factor': 0.1},
-    'qVm': {'title': 'объём q·Vm, см³/г', 'col': 'q·Vm, cm³/g', 'axis': 'q·Vm (cm³/g)',
+    'qVm': {'title': t('объём q·Vm, см³/г', 'q·Vm volume, cm³/g'), 'col': 'q·Vm, cm³/g', 'axis': 'q·Vm (cm³/g)',
             'short': 'cm³/g', 'tau_factor': 0.1},
 }
 
-POSITIVE_CHOICES = ['да', 'нет', 'не знаю']
+POSITIVE_CHOICES = [t('да', 'yes'), t('нет', 'no'), t('не знаю', 'unknown')]
+YES = POSITIVE_CHOICES[0]
+# значения из файлов на любом языке → текущий язык
+_POSITIVE_ANY = {'да': 0, 'yes': 0, 'нет': 1, 'no': 1, 'не знаю': 2, 'unknown': 2}
+
+
+def norm_positive(value) -> str:
+    return POSITIVE_CHOICES[_POSITIVE_ANY.get(str(value).strip().lower(), 2)]
 FORMAT_VERSION = 'graphene-site-dataset-v1'
+JOURNAL_COLS = [t('Время', 'Time'), t('Действие', 'Action'), t('Вещество', 'Substance'),
+                t('Столбец', 'Column'), t('Было', 'Old'), t('Стало', 'New')]
+SHEETS = {'data': t('Датасет', 'Dataset'), 'meta': t('Дескрипторы', 'Descriptors'),
+          'log': t('Журнал', 'Log'), 'info': t('Инфо', 'Info')}
+# Имена листов и столбцов на обоих языках → текущий язык (чтобы файл с русского сайта
+# открывался на английском и наоборот)
+_ANY_LANG = {
+    'Датасет': 'data', 'Dataset': 'data', 'Дескрипторы': 'meta', 'Descriptors': 'meta',
+    'Журнал': 'log', 'Log': 'log', 'Инфо': 'info', 'Info': 'info',
+}
+_COLS_BOTH = [('M, г/моль', 'M, g/mol'), ('Плотность, г/см³', 'Density, g/cm³'),
+              ('Химический класс', 'Chemical class'), ('Класс ИК-отклика', 'IR response class'),
+              ('Включено', 'Included'), ('Добавлено', 'Added'),
+              ('Дескриптор', 'Descriptor'), ('Подпись на графике', 'Plot label'),
+              ('Полное название', 'Full name'), ('Единицы', 'Units'), ('Пояснение', 'Description'),
+              ('Рост усиливает связывание', 'Increase strengthens binding'),
+              ('Использовать в анализе', 'Use in analysis'), ('Добавлен на сайте', 'Added on site'),
+              ('В ноутбуке', 'In notebook'), ('Ключ', 'Key'), ('Значение', 'Value'),
+              ('Время', 'Time'), ('Действие', 'Action'), ('Вещество', 'Substance'),
+              ('Столбец', 'Column'), ('Было', 'Old'), ('Стало', 'New')]
+_TO_CURRENT = {a: t(a, b) for a, b in _COLS_BOTH}
+_TO_CURRENT.update({b: t(a, b) for a, b in _COLS_BOTH})
+_YES = {'да', 'yes', 'true', '1'}
+
+
+# в скрытом листе _exact имена столбцов всегда английские
+_ENGLISH = {t(a, b): b for a, b in _COLS_BOTH}
+_CURRENT_FROM_EN = {b: t(a, b) for a, b in _COLS_BOTH}
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +108,7 @@ def descriptors_from_smiles(smiles: str) -> dict:
     from rdkit.Chem import Descriptors, rdMolDescriptors
     mol = Chem.MolFromSmiles(str(smiles).strip())
     if mol is None:
-        raise ValueError(f'RDKit не смог разобрать SMILES «{smiles}».')
+        raise ValueError(t(f'RDKit не смог разобрать SMILES «{smiles}».', f'RDKit could not parse SMILES "{smiles}".'))
     return {M_COL: round(Descriptors.MolWt(mol), 3),
             'TopoPSA 2D (RDKit, N/O), Å²': round(rdMolDescriptors.CalcTPSA(mol), 2)}
 
@@ -91,7 +127,7 @@ def parse_number(value):
         return np.nan
     text = text.replace(',', '.')
     if not re.fullmatch(r'[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?', text):
-        raise ValueError(f'«{value}» — не число. Введите число, например 1,25 или 1.25.')
+        raise ValueError(t(f'«{value}» — не число. Введите число, например 1,25 или 1.25.', f'"{value}" is not a number. Use e.g. 1.25 or 1,25.'))
     return float(text)
 
 
@@ -115,7 +151,7 @@ def read_excel_raw(path=EXCEL_PATH) -> pd.DataFrame:
 
 def default_descriptor_meta(column: str) -> dict:
     return {'label': column, 'long_name': column, 'units': '', 'explanation': '',
-            'positive': 'не знаю', 'use': True, 'added': False, 'in_notebook': ''}
+            'positive': POSITIVE_CHOICES[2], 'use': True, 'added': False, 'in_notebook': ''}
 
 
 def load_config_meta() -> dict:
@@ -125,8 +161,12 @@ def load_config_meta() -> dict:
         cfg = pd.read_csv(path, dtype=str).fillna('')
         for _, r in cfg.iterrows():
             m = default_descriptor_meta(r['column'])
-            m.update({k: r[k] for k in ('label', 'long_name', 'units', 'explanation', 'positive',
-                                         'in_notebook')})
+            m.update({k: r[k] for k in ('label', 'long_name', 'units', 'explanation', 'in_notebook')})
+            if LANG == 'en':
+                for k in ('units', 'explanation', 'in_notebook'):
+                    if r.get(f'{k}_en', ''):
+                        m[k] = r[f'{k}_en']
+            m['positive'] = norm_positive(r['positive'])
             meta[r['column']] = m
     return meta
 
@@ -136,7 +176,8 @@ def load_classes() -> dict:
     if not path.exists():
         return {}
     cfg = pd.read_csv(path, dtype=str).fillna('')
-    return {A.probe_key(n): c for n, c in zip(cfg['Name'], cfg[CLASS_COL])}
+    col = CLASS_COL if CLASS_COL in cfg.columns else cfg.columns[1]
+    return {A.probe_key(n): c for n, c in zip(cfg['Name'], cfg[col])}
 
 
 class Dataset:
@@ -186,16 +227,16 @@ class Dataset:
             self.undo_stack.pop(0)
 
     def _log(self, action, substance='', column='', old='', new=''):
-        self.journal.append({'Время': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                             'Действие': action, 'Вещество': substance, 'Столбец': column,
-                             'Было': fmt_number(old) if not isinstance(old, str) else old,
-                             'Стало': fmt_number(new) if not isinstance(new, str) else new})
+        self.journal.append({JOURNAL_COLS[0]: datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                             JOURNAL_COLS[1]: action, JOURNAL_COLS[2]: substance, JOURNAL_COLS[3]: column,
+                             JOURNAL_COLS[4]: fmt_number(old) if not isinstance(old, str) else old,
+                             JOURNAL_COLS[5]: fmt_number(new) if not isinstance(new, str) else new})
         self.version += 1
 
     def undo(self) -> str | None:
         if not self.undo_stack:
             return None
-        last = self.journal[-1]['Действие'] if self.journal else 'изменение'
+        last = self.journal[-1].get(JOURNAL_COLS[1], '') if self.journal else t('изменение', 'change')
         snap = self.undo_stack.pop()
         self.values, self.meta = snap['values'], snap['meta']
         self.descriptors, self.journal = snap['descriptors'], snap['journal']
@@ -234,17 +275,17 @@ class Dataset:
         if column == NAME:
             new = str(raw_value).strip()
             if not new:
-                raise ValueError('Название не может быть пустым.')
+                raise ValueError(t('Название не может быть пустым.', 'Name cannot be empty.'))
             if new in set(self.values.loc[self.values[ROW_ID] != row_id, NAME].astype(str)):
-                raise ValueError(f'Вещество «{new}» уже есть в таблице.')
+                raise ValueError(t(f'Вещество «{new}» уже есть в таблице.', f'"{new}" is already in the table.'))
         elif column in self.numeric_columns():
             new = parse_number(raw_value)
             if column == SORPTION and np.isnan(new):
-                raise ValueError('Сорбция обязательна и не может быть пустой.')
+                raise ValueError(t('Сорбция обязательна и не может быть пустой.', 'Sorption is required.'))
         elif column == IR_COL:
             new = str(raw_value or '').strip()
             if new and new not in IR_CLASSES:
-                raise ValueError('Класс ИК-отклика — 1, 2, 3 или пусто.')
+                raise ValueError(t('Класс ИК-отклика — 1, 2, 3 или пусто.', 'IR response class must be 1, 2, 3 or empty.'))
         else:
             new = '' if raw_value is None else str(raw_value).strip()
         same = (old == new) or (isinstance(old, float) and isinstance(new, float)
@@ -253,7 +294,7 @@ class Dataset:
             return False
         self._push()
         self.values.at[i, column] = new
-        self._log('Изменено значение', name, column, old, new)
+        self._log(t('Изменено значение', 'Value changed'), name, column, old, new)
         return True
 
     def set_included(self, row_ids, flag: bool, reason=''):
@@ -264,7 +305,7 @@ class Dataset:
         for r in row_ids:
             self.values.at[self.row_index(r), INCLUDED] = flag
         names = ', '.join(self.name_of(r) for r in row_ids)
-        self._log(('Включено' if flag else 'Выключено') + (f' ({reason})' if reason else ''), names,
+        self._log((t('Включено', 'Included') if flag else t('Выключено', 'Excluded')) + (f' ({reason})' if reason else ''), names,
                   INCLUDED, str(not flag), str(flag))
         return len(row_ids)
 
@@ -279,19 +320,20 @@ class Dataset:
             return 0
         self._push()
         self.values.loc[orig, INCLUDED] = target[orig]
-        self._log('Набор: ' + ('все вещества из Excel' if kind == 'all' else 'как в ноутбуке filtered'),
-                  f'изменено веществ: {len(changes)}')
+        self._log(t('Набор: ', 'Preset: ') + (t('все вещества из Excel', 'all substances from Excel') if kind == 'all'
+                                             else t('как в ноутбуке filtered', 'as in the filtered notebook')),
+                  t(f'изменено веществ: {len(changes)}', f'substances changed: {len(changes)}'))
         return len(changes)
 
     def add_substance(self, fields: dict):
         name = str(fields.get(NAME, '')).strip()
         if not name:
-            raise ValueError('Укажите название вещества.')
+            raise ValueError(t('Укажите название вещества.', 'Enter a substance name.'))
         if name in set(self.values[NAME].astype(str)):
-            raise ValueError(f'Вещество «{name}» уже есть в таблице.')
+            raise ValueError(t(f'Вещество «{name}» уже есть в таблице.', f'"{name}" is already in the table.'))
         sorption = parse_number(fields.get(SORPTION))
         if np.isnan(sorption):
-            raise ValueError('Укажите сорбцию в ммоль/г.')
+            raise ValueError(t('Укажите сорбцию в ммоль/г.', 'Enter sorption in mmol/g.'))
         row = {c: np.nan for c in self.values.columns}
         row.update({NAME: name, SORPTION: sorption, SMILES: str(fields.get(SMILES, '') or '').strip(),
                     CLASS_COL: str(fields.get(CLASS_COL, '') or '').strip(),
@@ -305,23 +347,23 @@ class Dataset:
         self.values[INCLUDED] = self.values[INCLUDED].astype(bool)
         self.values[ADDED] = self.values[ADDED].astype(bool)
         self.next_id += 1
-        self._log('Добавлено вещество', name)
+        self._log(t('Добавлено вещество', 'Substance added'), name)
 
     def delete_substance(self, row_id):
         i = self.row_index(row_id)
         if not bool(self.values.at[i, ADDED]):
-            raise ValueError('Исходные вещества из Excel не удаляются — их можно только выключить.')
+            raise ValueError(t('Исходные вещества из Excel не удаляются — их можно только выключить.', 'Original Excel substances cannot be deleted, only excluded.'))
         name = self.name_of(row_id)
         self._push()
         self.values = self.values.drop(index=i).reset_index(drop=True)
-        self._log('Удалено вещество', name)
+        self._log(t('Удалено вещество', 'Substance deleted'), name)
 
     def add_descriptor(self, name, units='', explanation='', positive='не знаю'):
         name = str(name).strip()
         if not name:
-            raise ValueError('Укажите название дескриптора.')
+            raise ValueError(t('Укажите название дескриптора.', 'Enter a descriptor name.'))
         if name in self.values.columns or name in (INCLUDED, ADDED, ROW_ID):
-            raise ValueError(f'Столбец «{name}» уже существует.')
+            raise ValueError(t(f'Столбец «{name}» уже существует.', f'Column "{name}" already exists.'))
         label = f'{name} ({units})' if units else name
         self._push()
         pos = list(self.values.columns).index(M_COL)
@@ -330,16 +372,16 @@ class Dataset:
         self.meta[name] = {'label': label, 'long_name': name, 'units': units,
                            'explanation': explanation, 'positive': positive, 'use': True,
                            'added': True, 'in_notebook': ''}
-        self._log('Добавлен дескриптор', '', name)
+        self._log(t('Добавлен дескриптор', 'Descriptor added'), '', name)
 
     def delete_descriptor(self, name):
         if not self.meta[name].get('added'):
-            raise ValueError('Исходные дескрипторы не удаляются — их можно только исключить из анализа.')
+            raise ValueError(t('Исходные дескрипторы не удаляются — их можно только исключить из анализа.', 'Original descriptors cannot be deleted, only excluded from analysis.'))
         self._push()
         self.values = self.values.drop(columns=[name])
         self.descriptors.remove(name)
         del self.meta[name]
-        self._log('Удалён дескриптор', '', name)
+        self._log(t('Удалён дескриптор', 'Descriptor deleted'), '', name)
 
     def set_meta(self, name, key, value):
         old = self.meta[name].get(key)
@@ -347,9 +389,12 @@ class Dataset:
             return False
         self._push()
         self.meta[name][key] = value
-        titles = {'use': 'Использовать в анализе', 'positive': 'Рост усиливает связывание',
-                  'label': 'Подпись на графике', 'units': 'Единицы', 'explanation': 'Пояснение'}
-        self._log(f'Свойство дескриптора: {titles.get(key, key)}', '', name, str(old), str(value))
+        titles = {'use': t('Использовать в анализе', 'Use in analysis'),
+                  'positive': t('Рост усиливает связывание', 'Increase strengthens binding'),
+                  'label': t('Подпись на графике', 'Plot label'), 'units': t('Единицы', 'Units'),
+                  'explanation': t('Пояснение', 'Description')}
+        self._log(t('Свойство дескриптора: ', 'Descriptor property: ') + titles.get(key, key), '', name,
+                  str(old), str(value))
         return True
 
     def paste_column(self, column, text, mode='order'):
@@ -361,12 +406,12 @@ class Dataset:
         updates = {}
         if mode == 'order':
             if len(lines) > len(self.values):
-                raise ValueError(f'Вставлено {len(lines)} значений, а веществ в таблице {len(self.values)}.')
+                raise ValueError(t(f'Вставлено {len(lines)} значений, а веществ в таблице {len(self.values)}.', f'{len(lines)} values pasted but the table has {len(self.values)} substances.'))
             for i, ln in enumerate(lines):
                 try:
                     updates[self.values.at[i, ROW_ID]] = parse_number(ln)
                 except ValueError as e:
-                    raise ValueError(f'Строка {i + 1}: {e}')
+                    raise ValueError(t(f'Строка {i + 1}: {e}', f'Line {i + 1}: {e}'))
         else:
             keys = {A.probe_key(n): rid for n, rid in zip(self.values[NAME], self.values[ROW_ID])}
             unknown = []
@@ -375,7 +420,7 @@ class Dataset:
                     continue
                 parts = re.split(r'\t|;', ln)
                 if len(parts) < 2:
-                    raise ValueError(f'Строка {i}: нужен формат «название<Tab>значение» или «название;значение».')
+                    raise ValueError(t(f'Строка {i}: нужен формат «название<Tab>значение» или «название;значение».', f'Line {i}: expected "name<Tab>value" or "name;value".'))
                 name, val = parts[0].strip(), parts[-1]
                 rid = keys.get(A.probe_key(name))
                 if rid is None:
@@ -384,22 +429,22 @@ class Dataset:
                 try:
                     updates[rid] = parse_number(val)
                 except ValueError as e:
-                    raise ValueError(f'Строка {i}: {e}')
+                    raise ValueError(t(f'Строка {i}: {e}', f'Line {i}: {e}'))
             if unknown:
-                raise ValueError('Не найдены вещества: ' + ', '.join(unknown))
+                raise ValueError(t('Не найдены вещества: ', 'Substances not found: ') + ', '.join(unknown))
         if not updates:
             return 0
         self._push()
         for rid, v in updates.items():
             self.values.at[self.row_index(rid), column] = v
-        self._log('Вставлен столбец', f'значений: {len(updates)}', column)
+        self._log(t('Вставлен столбец', 'Column pasted'), t(f'значений: {len(updates)}', f'values: {len(updates)}'), column)
         return len(updates)
 
     def set_class_bulk(self, mapping: dict):
         self._push()
         for rid, cls in mapping.items():
             self.values.at[self.row_index(rid), CLASS_COL] = cls
-        self._log('Изменены химические классы', f'веществ: {len(mapping)}', CLASS_COL)
+        self._log(t('Изменены химические классы', 'Chemical classes changed'), t(f'веществ: {len(mapping)}', f'substances: {len(mapping)}'), CLASS_COL)
 
     # ------------------------------------------------------------ for analysis
     def units_available(self):
@@ -434,13 +479,13 @@ class Dataset:
 
     # ------------------------------------------------------------- comparison
     def diff(self) -> pd.DataFrame:
+        cols = [t('Вещество', 'Substance'), t('Столбец', 'Column'), t('В Excel', 'In Excel'), t('Сейчас', 'Now')]
         rows = []
         orig = self.original.set_index(ROW_ID)
         for _, r in self.values.iterrows():
             rid = r[ROW_ID]
             if bool(r[ADDED]) or rid not in orig.index:
-                rows.append({'Вещество': r[NAME], 'Столбец': '—', 'В Excel': '—',
-                             'Сейчас': 'добавлено на сайте'})
+                rows.append(dict(zip(cols, [r[NAME], '—', '—', t('добавлено на сайте', 'added on site')])))
                 continue
             o = orig.loc[rid]
             for c in self.values.columns:
@@ -452,117 +497,135 @@ class Dataset:
                     continue
                 if (isinstance(a, float) and np.isnan(a)) and b == '':
                     continue
-                rows.append({'Вещество': r[NAME], 'Столбец': c,
-                             'В Excel': fmt_number(a) if not isinstance(a, (str, bool, np.bool_)) else str(a),
-                             'Сейчас': fmt_number(b) if not isinstance(b, (str, bool, np.bool_)) else str(b)})
+                rows.append(dict(zip(cols, [
+                    r[NAME], c,
+                    fmt_number(a) if not isinstance(a, (str, bool, np.bool_)) else str(a),
+                    fmt_number(b) if not isinstance(b, (str, bool, np.bool_)) else str(b)])))
         for d in self.descriptors:
             if self.meta[d].get('added'):
-                rows.append({'Вещество': '—', 'Столбец': d, 'В Excel': '—',
-                             'Сейчас': 'дескриптор добавлен на сайте'})
+                rows.append(dict(zip(cols, ['—', d, '—', t('дескриптор добавлен на сайте', 'descriptor added on site')])))
         for d in self.original_descriptors:
-            if d not in self.descriptors:
-                continue
-            if not self.meta[d].get('use', True):
-                rows.append({'Вещество': '—', 'Столбец': d, 'В Excel': 'в анализе',
-                             'Сейчас': 'исключён из анализа'})
-        return pd.DataFrame(rows, columns=['Вещество', 'Столбец', 'В Excel', 'Сейчас'])
+            if d in self.descriptors and not self.meta[d].get('use', True):
+                rows.append(dict(zip(cols, ['—', d, t('в анализе', 'used'), t('исключён из анализа', 'excluded')])))
+        return pd.DataFrame(rows, columns=cols)
 
     def excel_discrepancies(self) -> pd.DataFrame:
         """Расхождения молярной массы и г/г между Excel и расчётом по SMILES."""
         v = self.values
         q = pd.to_numeric(v[SORPTION], errors='coerce')
         gg_calc = q * v[M_COL] / 1000
-        out = pd.DataFrame({'Вещество': v[NAME], 'M в Excel, г/моль': v[EXCEL_M],
-                            'M по SMILES, г/моль': v[M_COL], 'г/г в Excel': v[EXCEL_GG],
-                            'г/г из ммоль/г и M': gg_calc})
-        bad_m = (out['M в Excel, г/моль'] - out['M по SMILES, г/моль']).abs() > 0.05
-        bad_g = (out['г/г в Excel'] - out['г/г из ммоль/г и M']).abs() > 0.002
-        out['Расхождение'] = np.where(bad_g, 'г/г в Excel не равен ммоль/г × M / 1000', '')
+        c = [t('Вещество', 'Substance'), t('M в Excel, г/моль', 'M in Excel, g/mol'),
+             t('M по SMILES, г/моль', 'M from SMILES, g/mol'), t('г/г в Excel', 'g/g in Excel'),
+             t('г/г из ммоль/г и M', 'g/g from mmol/g and M')]
+        out = pd.DataFrame({c[0]: v[NAME], c[1]: v[EXCEL_M], c[2]: v[M_COL], c[3]: v[EXCEL_GG], c[4]: gg_calc})
+        bad_m = (out[c[1]] - out[c[2]]).abs() > 0.05
+        bad_g = (out[c[3]] - out[c[4]]).abs() > 0.002
+        out[t('Расхождение', 'Mismatch')] = np.where(
+            bad_g, t('г/г в Excel не равен ммоль/г × M / 1000', 'Excel g/g ≠ mmol/g × M / 1000'), '')
         return out[bad_g].reset_index(drop=True), int(bad_m.sum())
 
     # ------------------------------------------------------------ export/import
     def to_xlsx(self) -> bytes:
         buf = io.BytesIO()
+        yes, no = POSITIVE_CHOICES[0], POSITIVE_CHOICES[1]
         data = self.values.copy()
-        data[INCLUDED] = data[INCLUDED].map(lambda x: 'да' if bool(x) else 'нет')
-        data[ADDED] = data[ADDED].map(lambda x: 'да' if bool(x) else 'нет')
-        meta = pd.DataFrame([{'Дескриптор': d, 'Подпись на графике': m['label'],
-                              'Полное название': m['long_name'], 'Единицы': m['units'],
-                              'Пояснение': m['explanation'],
-                              'Рост усиливает связывание': m['positive'],
-                              'Использовать в анализе': 'да' if m.get('use', True) else 'нет',
-                              'Добавлен на сайте': 'да' if m.get('added') else 'нет',
-                              'В ноутбуке': m.get('in_notebook', '')}
+        data[INCLUDED] = data[INCLUDED].map(lambda x: yes if bool(x) else no)
+        data[ADDED] = data[ADDED].map(lambda x: yes if bool(x) else no)
+        mc = {k: _TO_CURRENT[k] for k in ('Дескриптор', 'Подпись на графике', 'Полное название', 'Единицы',
+                                           'Пояснение', 'Рост усиливает связывание', 'Использовать в анализе',
+                                           'Добавлен на сайте', 'В ноутбуке', 'Ключ', 'Значение')}
+        meta = pd.DataFrame([{mc['Дескриптор']: d, mc['Подпись на графике']: m['label'],
+                              mc['Полное название']: m['long_name'], mc['Единицы']: m['units'],
+                              mc['Пояснение']: m['explanation'],
+                              mc['Рост усиливает связывание']: m['positive'],
+                              mc['Использовать в анализе']: yes if m.get('use', True) else no,
+                              mc['Добавлен на сайте']: yes if m.get('added') else no,
+                              mc['В ноутбуке']: m.get('in_notebook', '')}
                              for d, m in ((d, self.meta[d]) for d in self.descriptors)])
-        info = pd.DataFrame({'Ключ': ['format', 'saved_at'],
-                             'Значение': [FORMAT_VERSION, datetime.now().isoformat(timespec='seconds')]})
+        info = pd.DataFrame({mc['Ключ']: ['format', 'saved_at'],
+                             mc['Значение']: [FORMAT_VERSION, datetime.now().isoformat(timespec='seconds')]})
         with pd.ExcelWriter(buf, engine='openpyxl') as w:
-            data.to_excel(w, sheet_name='Датасет', index=False)
-            meta.to_excel(w, sheet_name='Дескрипторы', index=False)
-            pd.DataFrame(self.journal, columns=['Время', 'Действие', 'Вещество', 'Столбец', 'Было',
-                                                'Стало']).to_excel(w, sheet_name='Журнал', index=False)
-            info.to_excel(w, sheet_name='Инфо', index=False)
+            data.to_excel(w, sheet_name=SHEETS['data'], index=False)
+            meta.to_excel(w, sheet_name=SHEETS['meta'], index=False)
+            pd.DataFrame(self.journal, columns=JOURNAL_COLS).to_excel(w, sheet_name=SHEETS['log'], index=False)
+            info.to_excel(w, sheet_name=SHEETS['info'], index=False)
             # Точные значения (Excel хранит ~15 знаков): нужны, чтобы загрузка восстанавливала
             # датасет бит в бит. Если ячейку правили в Excel, берётся видимое значение.
             exact = self.values[[ROW_ID] + [c for c in self.numeric_columns() if c in self.values]].copy()
             for c in exact.columns[1:]:
                 exact[c] = exact[c].map(lambda v: '' if pd.isna(v) else repr(float(v)))
+            exact = exact.rename(columns=lambda c: _ENGLISH.get(c, c))
             exact.to_excel(w, sheet_name='_exact', index=False)
             w.book['_exact'].sheet_state = 'hidden'
         return buf.getvalue()
 
     @classmethod
     def from_xlsx(cls, file) -> 'Dataset':
+        """Загружает файл, скачанный с русского или английского сайта."""
         try:
-            book = pd.read_excel(file, sheet_name=None)
+            raw_book = pd.read_excel(file, sheet_name=None)
         except Exception as e:
-            raise ValueError(f'Не удалось прочитать файл как Excel (.xlsx): {e}')
-        need = {'Датасет', 'Дескрипторы', 'Журнал', 'Инфо'}
+            raise ValueError(t(f'Не удалось прочитать файл как Excel (.xlsx): {e}',
+                               f'Could not read the file as Excel (.xlsx): {e}'))
+        book = {}
+        for name, sheet in raw_book.items():
+            key = _ANY_LANG.get(name, name)
+            book[key] = sheet.rename(columns=lambda c: _TO_CURRENT.get(str(c), c))
+        need = {'data', 'meta', 'log', 'info'}
         if not need.issubset(book):
-            raise ValueError('Это не файл, скачанный с сайта: нужны листы ' + ', '.join(sorted(need))
-                             + f'. В файле: {", ".join(book)}.')
-        info = book['Инфо']
-        if FORMAT_VERSION not in set(info.get('Значение', pd.Series(dtype=object)).astype(str)):
-            raise ValueError('Неизвестная версия формата файла.')
-        data, meta = book['Датасет'], book['Дескрипторы']
+            raise ValueError(t('Это не файл, скачанный с сайта: нужны листы ', 'Not a file saved by this site: '
+                               'expected sheets ') + ', '.join(SHEETS[k] for k in sorted(need))
+                             + t('. В файле: ', '. Found: ') + ', '.join(raw_book) + '.')
+        info = book['info']
+        val_col = _TO_CURRENT['Значение']
+        if FORMAT_VERSION not in set(info.get(val_col, pd.Series(dtype=object)).astype(str)):
+            raise ValueError(t('Неизвестная версия формата файла.', 'Unknown file format version.'))
+        data, meta = book['data'], book['meta']
         for c in (NAME, SORPTION, INCLUDED, ADDED):
             if c not in data.columns:
-                raise ValueError(f'На листе «Датасет» нет столбца «{c}».')
+                raise ValueError(t(f'На листе «{SHEETS["data"]}» нет столбца «{c}».',
+                                   f'Sheet "{SHEETS["data"]}" has no column "{c}".'))
+        mc = _TO_CURRENT
         ds = cls(read_excel_raw())
-        ds.descriptors = [str(d) for d in meta['Дескриптор']]
+        ds.descriptors = [str(d) for d in meta[mc['Дескриптор']]]
         ds.meta = {}
+        txt = lambda v: '' if pd.isna(v) else str(v)
         for _, r in meta.iterrows():
-            d = str(r['Дескриптор'])
+            d = str(r[mc['Дескриптор']])
             if d not in data.columns:
-                raise ValueError(f'Дескриптор «{d}» описан, но столбца с ним нет.')
-            ds.meta[d] = {'label': str(r['Подпись на графике']), 'long_name': str(r['Полное название']),
-                          'units': '' if pd.isna(r['Единицы']) else str(r['Единицы']),
-                          'explanation': '' if pd.isna(r['Пояснение']) else str(r['Пояснение']),
-                          'positive': str(r['Рост усиливает связывание']),
-                          'use': str(r['Использовать в анализе']) == 'да',
-                          'added': str(r['Добавлен на сайте']) == 'да',
-                          'in_notebook': '' if pd.isna(r.get('В ноутбуке')) else str(r.get('В ноутбуке'))}
+                raise ValueError(t(f'Дескриптор «{d}» описан, но столбца с ним нет.',
+                                   f'Descriptor "{d}" is described but has no column.'))
+            ds.meta[d] = {'label': txt(r[mc['Подпись на графике']]), 'long_name': txt(r[mc['Полное название']]),
+                          'units': txt(r[mc['Единицы']]), 'explanation': txt(r[mc['Пояснение']]),
+                          'positive': norm_positive(r[mc['Рост усиливает связывание']]),
+                          'use': str(r[mc['Использовать в анализе']]).strip().lower() in _YES,
+                          'added': str(r[mc['Добавлен на сайте']]).strip().lower() in _YES,
+                          'in_notebook': txt(r.get(mc['В ноутбуке']))}
         values = data.copy()
         for c in ds.numeric_columns():
             if c in values.columns:
                 try:
                     values[c] = values[c].map(parse_number).astype(float)
                 except ValueError as e:
-                    raise ValueError(f'Столбец «{c}»: {e}')
+                    raise ValueError(t(f'Столбец «{c}»: {e}', f'Column "{c}": {e}'))
         for c in (SMILES, CLASS_COL, IR_COL):
             if c not in values.columns:
                 values[c] = ''
             values[c] = values[c].fillna('').astype(str).replace('nan', '')
         values[IR_COL] = values[IR_COL].str.replace(r'\.0$', '', regex=True)
-        values[INCLUDED] = values[INCLUDED].astype(str).str.lower().isin(['да', 'true', '1'])
-        values[ADDED] = values[ADDED].astype(str).str.lower().isin(['да', 'true', '1'])
+        values[INCLUDED] = values[INCLUDED].astype(str).str.strip().str.lower().isin(_YES)
+        values[ADDED] = values[ADDED].astype(str).str.strip().str.lower().isin(_YES)
         if values[NAME].isna().any() or values[NAME].astype(str).duplicated().any():
-            raise ValueError('Названия веществ должны быть заполнены и не повторяться.')
+            raise ValueError(t('Названия веществ должны быть заполнены и не повторяться.',
+                               'Substance names must be filled in and unique.'))
+        log = book['log'].fillna('').astype(str)
+        journal = [{JOURNAL_COLS[i]: row.get(c, '') for i, c in enumerate(JOURNAL_COLS)}
+                   for row in log.to_dict(orient='records')]
         # исходные строки получают те же ID, что в Excel (для сравнения), добавленные — новые
         if ROW_ID in values.columns and values[ROW_ID].notna().all():
             values[ROW_ID] = values[ROW_ID].astype(int)
             if '_exact' in book:
-                exact = book['_exact'].set_index(ROW_ID)
+                exact = book['_exact'].rename(columns=lambda c: _CURRENT_FROM_EN.get(c, c)).set_index(ROW_ID)
                 for c in exact.columns:
                     if c not in values.columns:
                         continue
@@ -578,7 +641,7 @@ class Dataset:
                             values.at[i, c] = e
             ds.values = values.reset_index(drop=True)
             ds.next_id = int(max(values[ROW_ID].max() + 1, len(ds.original)))
-            ds.journal = book['Журнал'].fillna('').astype(str).to_dict(orient='records')
+            ds.journal = journal
             ds.undo_stack = []
             ds.version += 1
             return ds
@@ -594,7 +657,7 @@ class Dataset:
         values[ROW_ID] = ids
         ds.values = values.reset_index(drop=True)
         ds.next_id = nxt
-        ds.journal = book['Журнал'].fillna('').astype(str).to_dict(orient='records')
+        ds.journal = journal
         ds.undo_stack = []
         ds.version += 1
         return ds
