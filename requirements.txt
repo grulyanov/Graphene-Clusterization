@@ -1,0 +1,11 @@
+# Версии закреплены: так сайт на Streamlit Community Cloud считает то же, что и локально.
+streamlit==1.67.0
+pandas==3.1.1
+numpy==2.5.5
+scipy==1.18.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+seaborn==0.13.2
+joblib==1.6.0
+openpyxl==3.1.5
+rdkit==2026.9.2
