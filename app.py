@@ -33,7 +33,17 @@ div[data-testid="stExpander"] summary p {font-size: 0.95rem;}
 </style>
 """, unsafe_allow_html=True)
 
-N_CPU = os.cpu_count() or 2
+def _effective_cpus():
+    # os.cpu_count() на Streamlit Cloud показывает все ядра машины (16), а контейнеру доступно ~2.
+    # joblib (loky) учитывает ограничения cgroup и привязку процесса к ядрам.
+    try:
+        from joblib import cpu_count
+        return max(1, int(cpu_count()))
+    except Exception:
+        return os.cpu_count() or 2
+
+
+N_CPU = _effective_cpus()
 PAGES = ['📋 Данные', '🧩 Кластеризация', '📈 Корреляции', '✅ Валидация']
 
 

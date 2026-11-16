@@ -411,36 +411,41 @@ class RansacResult:
         return self.estimator_.predict(X)
 
 
-_SUBSETS: 'OrderedDict' = None
+_SUBSETS = None
 
 
 def _subsets(n, k, random_state, count):
     """Подвыборки в точности как sklearn: sample_without_replacement(n, k, rng) подряд
     из одного RandomState(random_state). При 0.01 < k/n < 0.99 sklearn делает
-    rng.permutation(n)[:k] — это проверено в dev/verify.py. Последовательность зависит
-    только от (n, k, seed), поэтому кэшируется и переиспользуется для всех τ."""
+    rng.permutation(n)[:k] — проверено в dev/fast_equivalence.py. Последовательность зависит
+    только от (n, k, seed): она кэшируется вместе с состоянием генератора и достраивается
+    по мере надобности, поэтому одна и та же используется для всех τ."""
     global _SUBSETS
     from collections import OrderedDict
     if _SUBSETS is None:
         _SUBSETS = OrderedDict()
     key = (n, k, random_state)
-    arr = _SUBSETS.get(key)
-    if arr is not None and len(arr) >= count:
-        _SUBSETS.move_to_end(key)
-        return arr[:count]
-    rng = np.random.RandomState(random_state)
-    if 0.01 < k / n < 0.99:
-        arr = np.empty((count, k), dtype=np.intp)
-        for i in range(count):
-            arr[i] = rng.permutation(n)[:k]
-    else:
-        arr = np.array([sample_without_replacement(n, k, random_state=rng) for _ in range(count)],
-                       dtype=np.intp).reshape(count, k)
-    if count >= 500:          # короткие последовательности (перестановочный тест) не храним
-        _SUBSETS[key] = arr
-        while len(_SUBSETS) > 64:
+    entry = _SUBSETS.get(key)
+    if entry is None:
+        entry = [np.empty((0, k), dtype=np.intp), np.random.RandomState(random_state)]
+        _SUBSETS[key] = entry
+        while len(_SUBSETS) > 256:
             _SUBSETS.popitem(last=False)
-    return arr
+    else:
+        _SUBSETS.move_to_end(key)
+    arr, rng = entry
+    if len(arr) < count:
+        extra = count - len(arr)
+        if 0.01 < k / n < 0.99:
+            new = np.empty((extra, k), dtype=np.intp)
+            for i in range(extra):
+                new[i] = rng.permutation(n)[:k]
+        else:
+            new = np.array([sample_without_replacement(n, k, random_state=rng) for _ in range(extra)],
+                           dtype=np.intp).reshape(extra, k)
+        arr = np.concatenate([arr, new])
+        entry[0] = arr
+    return arr[:count]
 
 
 def _batch_fit(X, y, idx):
@@ -485,13 +490,9 @@ def ransac_fit(X, y, min_samples, residual_threshold, max_trials=100, stop_proba
     n_best, score_best, best_mask = 1, -np.inf, None
     max_t = float(limit)
     start, chunk = 0, 64
-    all_idx = _subsets(n, int(min_samples), int(random_state), limit) if limit >= 500 else None
     while start < max_t and start < limit:
         stop = int(min(limit, start + chunk, np.ceil(max_t)))
-        if all_idx is not None:
-            idx = all_idx[start:stop]
-        else:
-            idx = _subsets(n, int(min_samples), int(random_state), stop)[start:stop]
+        idx = _subsets(n, int(min_samples), int(random_state), stop)[start:stop]
         coef, intercept = _batch_fit(X, y, idx)
         pred = coef @ X.T + intercept[:, None] if X.shape[1] > 1 else coef[:, :1] * X[:, 0][None, :] + intercept[:, None]
         masks = np.abs(y[None, :] - pred) <= residual_threshold
