@@ -341,7 +341,194 @@ def format_tau_units(value, factor=1.0):
     return f'{float(value):.3f}'.rstrip('0').rstrip('.')
 
 
-def loo_q2(X, y):
+# ---------------------------------------------------------------------------
+# УСКОРЕНИЕ (ноябрь 2026). Логика ноутбука не меняется, меняется только «движок»:
+#  * Ols — та же линейная регрессия, что sklearn.LinearRegression (центрирование +
+#    scipy.linalg.lstsq с тем же cond), но без проверок входных данных sklearn,
+#    которые занимали ~90 % времени на крошечных выборках;
+#  * ransac_fit — точная копия цикла sklearn.RANSACRegressor.fit (те же случайные
+#    подвыборки из RandomState(random_state), та же логика выбора лучшей пробы и
+#    динамического max_trials), но пробы считаются пачками в numpy;
+#  * loo_q2 — все n LOO-подгонок одновременно.
+# USE_FAST = False возвращает исходные sklearn-реализации (для сверки, dev/verify.py).
+# ---------------------------------------------------------------------------
+import scipy.linalg as _sla
+from sklearn.linear_model._ransac import _dynamic_max_trials
+from sklearn.utils.random import sample_without_replacement
+
+USE_FAST = True
+
+
+class Ols:
+    """Линейная регрессия с intercept, численно как sklearn.LinearRegression (dense)."""
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        y = np.asarray(y, dtype=float).ravel()
+        x_off = np.average(X, axis=0)
+        y_off = np.average(y, axis=0)
+        cond = max(X.shape) * np.finfo(X.dtype).eps
+        coef, _, _, _ = _sla.lstsq(X - x_off, y - y_off, cond=cond)
+        self.coef_ = np.asarray(coef, dtype=float).ravel()
+        self.intercept_ = float(y_off - x_off @ self.coef_)
+        return self
+
+    def predict(self, X):
+        X = np.asarray(X, dtype=float)
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        return X @ self.coef_ + self.intercept_
+
+    def score(self, X, y):
+        return _r2(np.asarray(y, dtype=float).ravel(), self.predict(X))
+
+
+def _r2(y, pred):
+    """sklearn.metrics.r2_score для одного отклика (force_finite=True)."""
+    if len(y) < 2:
+        return float('nan')
+    num = ((y - pred) ** 2).sum()
+    den = ((y - np.average(y)) ** 2).sum()
+    if den != 0:
+        return float(1 - num / den) if num != 0 else 1.0
+    return 1.0 if num == 0 else 0.0
+
+
+def _linear():
+    return Ols() if USE_FAST else LinearRegression()
+
+
+class RansacResult:
+    """То, что ноутбук берёт у RANSACRegressor: inlier_mask_, estimator_, predict."""
+
+    def __init__(self, mask, estimator):
+        self.inlier_mask_ = mask
+        self.estimator_ = estimator
+
+    def predict(self, X):
+        return self.estimator_.predict(X)
+
+
+_SUBSETS: 'OrderedDict' = None
+
+
+def _subsets(n, k, random_state, count):
+    """Подвыборки в точности как sklearn: sample_without_replacement(n, k, rng) подряд
+    из одного RandomState(random_state). При 0.01 < k/n < 0.99 sklearn делает
+    rng.permutation(n)[:k] — это проверено в dev/verify.py. Последовательность зависит
+    только от (n, k, seed), поэтому кэшируется и переиспользуется для всех τ."""
+    global _SUBSETS
+    from collections import OrderedDict
+    if _SUBSETS is None:
+        _SUBSETS = OrderedDict()
+    key = (n, k, random_state)
+    arr = _SUBSETS.get(key)
+    if arr is not None and len(arr) >= count:
+        _SUBSETS.move_to_end(key)
+        return arr[:count]
+    rng = np.random.RandomState(random_state)
+    if 0.01 < k / n < 0.99:
+        arr = np.empty((count, k), dtype=np.intp)
+        for i in range(count):
+            arr[i] = rng.permutation(n)[:k]
+    else:
+        arr = np.array([sample_without_replacement(n, k, random_state=rng) for _ in range(count)],
+                       dtype=np.intp).reshape(count, k)
+    if count >= 500:          # короткие последовательности (перестановочный тест) не храним
+        _SUBSETS[key] = arr
+        while len(_SUBSETS) > 64:
+            _SUBSETS.popitem(last=False)
+    return arr
+
+
+def _batch_fit(X, y, idx):
+    """Подгонка прямых (плоскостей) сразу для пачки подвыборок idx (C×k)."""
+    xs = X[idx]                       # C×k×p
+    ys = y[idx]                       # C×k
+    xm = xs.mean(axis=1)              # C×p
+    ym = ys.mean(axis=1)              # C
+    xc = xs - xm[:, None, :]
+    yc = ys - ym[:, None]
+    if X.shape[1] == 1:
+        sxx = (xc[:, :, 0] ** 2).sum(axis=1)
+        sxy = (xc[:, :, 0] * yc).sum(axis=1)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            slope = np.where(sxx > 0, sxy / np.where(sxx > 0, sxx, 1.0), 0.0)
+        coef = slope[:, None]
+    else:
+        coef = np.einsum('cpk,ck->cp', np.linalg.pinv(xc), yc)
+    intercept = ym - (xm * coef).sum(axis=1)
+    return coef, intercept
+
+
+def ransac_fit(X, y, min_samples, residual_threshold, max_trials=100, stop_probability=0.99,
+               random_state=None):
+    """Быстрый эквивалент RANSACRegressor(estimator=LinearRegression(), loss='absolute_error',
+    ...).fit(X, y). Возвращает RansacResult или бросает ValueError, как sklearn."""
+    if not USE_FAST:
+        return RANSACRegressor(estimator=LinearRegression(), min_samples=min_samples,
+                               residual_threshold=residual_threshold, max_trials=max_trials,
+                               stop_probability=stop_probability, loss='absolute_error',
+                               random_state=random_state).fit(X, y)
+    X = np.asarray(X, dtype=float)
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+    y = np.asarray(y, dtype=float).ravel()
+    n = X.shape[0]
+    if min_samples > n:
+        raise ValueError('`min_samples` may not be larger than number of samples')
+    if not isinstance(random_state, (int, np.integer)) or not (0 <= int(random_state) < 2 ** 32):
+        np.random.RandomState(random_state)          # то же исключение, что в sklearn
+    limit = int(max_trials)
+    n_best, score_best, best_mask = 1, -np.inf, None
+    max_t = float(limit)
+    start, chunk = 0, 64
+    all_idx = _subsets(n, int(min_samples), int(random_state), limit) if limit >= 500 else None
+    while start < max_t and start < limit:
+        stop = int(min(limit, start + chunk, np.ceil(max_t)))
+        if all_idx is not None:
+            idx = all_idx[start:stop]
+        else:
+            idx = _subsets(n, int(min_samples), int(random_state), stop)[start:stop]
+        coef, intercept = _batch_fit(X, y, idx)
+        pred = coef @ X.T + intercept[:, None] if X.shape[1] > 1 else coef[:, :1] * X[:, 0][None, :] + intercept[:, None]
+        masks = np.abs(y[None, :] - pred) <= residual_threshold
+        n_in = masks.sum(axis=1)
+        # R² на точках-инлайерах (как estimator.score в sklearn)
+        cnt = n_in.astype(float)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ymean = (masks * y[None, :]).sum(axis=1) / cnt
+            num = (masks * (y[None, :] - pred) ** 2).sum(axis=1)
+            den = (masks * (y[None, :] - ymean[:, None]) ** 2).sum(axis=1)
+            score = np.where(den != 0, np.where(num != 0, 1 - num / np.where(den != 0, den, 1.0), 1.0),
+                             np.where(num == 0, 1.0, 0.0))
+        score = np.where(n_in < 2, np.nan, score)
+        n_in_l = n_in.tolist()
+        score_l = score.tolist()
+        for j in range(stop - start):
+            if start + j >= max_t:
+                break
+            ni = n_in_l[j]
+            if ni < n_best:
+                continue
+            sc = score_l[j]
+            if ni == n_best and sc < score_best:
+                continue
+            n_best, score_best = ni, sc
+            best_mask = masks[j]
+            max_t = min(max_t, _dynamic_max_trials(n_best, n, min_samples, stop_probability))
+        start = stop
+        chunk = min(chunk * 4, 4096)
+    if best_mask is None:
+        raise ValueError('RANSAC could not find a valid consensus set.')
+    best_mask = best_mask.copy()
+    return RansacResult(best_mask, Ols().fit(X[best_mask], y[best_mask]))
+
+
+def _loo_q2_reference(X, y):
+    """Исходная функция ноутбука (ячейка 40)."""
     X = np.asarray(X, dtype=float)
     if X.ndim == 1:
         X = X.reshape(-1, 1)
@@ -359,6 +546,36 @@ def loo_q2(X, y):
     return float(1 - np.sum((y - predictions) ** 2) / denominator)
 
 
+def loo_q2(X, y):
+    """Ячейка 40: Q² leave-one-out. Быстрая версия делает все n подгонок одновременно."""
+    if not USE_FAST:
+        return _loo_q2_reference(X, y)
+    X = np.asarray(X, dtype=float)
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+    y = np.asarray(y, dtype=float).ravel()
+    n = len(y)
+    if n <= X.shape[1] + 1:
+        return -np.inf
+    if X.shape[1] != 1:
+        predictions = np.array([Ols().fit(np.delete(X, i, 0), np.delete(y, i)).predict(X[i:i + 1])[0]
+                                for i in range(n)])
+    else:
+        keep = ~np.eye(n, dtype=bool)
+        xt = np.broadcast_to(X[:, 0], (n, n))[keep].reshape(n, n - 1)
+        yt = np.broadcast_to(y, (n, n))[keep].reshape(n, n - 1)
+        xm, ym = xt.mean(axis=1), yt.mean(axis=1)
+        xc = xt - xm[:, None]
+        sxx = (xc ** 2).sum(axis=1)
+        sxy = (xc * (yt - ym[:, None])).sum(axis=1)
+        slope = np.where(sxx > 0, sxy / np.where(sxx > 0, sxx, 1.0), 0.0)
+        predictions = X[:, 0] * slope + (ym - xm * slope)
+    denominator = np.sum((y - y.mean()) ** 2)
+    if denominator <= np.finfo(float).eps:
+        return -np.inf
+    return float(1 - np.sum((y - predictions) ** 2) / denominator)
+
+
 def stabilize_ransac_model(model, X, y, threshold, max_iterations=100):
     X_arr = np.asarray(X, dtype=float)
     y_arr = np.asarray(y, dtype=float).ravel()
@@ -369,7 +586,7 @@ def stabilize_ransac_model(model, X, y, threshold, max_iterations=100):
         if signature in seen or mask.sum() <= X_arr.shape[1]:
             return None
         seen.add(signature)
-        estimator = LinearRegression().fit(X_arr[mask], y_arr[mask])
+        estimator = _linear().fit(X_arr[mask], y_arr[mask])
         updated_mask = np.abs(y_arr - estimator.predict(X_arr)) <= float(threshold)
         if np.array_equal(updated_mask, mask):
             model.estimator_ = estimator
@@ -408,15 +625,9 @@ def optimize_ransac_hyperparameters(
             continue
         for current_threshold in threshold_grid:
             try:
-                model = RANSACRegressor(
-                    estimator=LinearRegression(),
-                    min_samples=current_min_samples,
-                    residual_threshold=float(current_threshold),
-                    max_trials=max_trials,
-                    stop_probability=stop_probability,
-                    loss='absolute_error',
-                    random_state=random_state
-                ).fit(X_arr, y_arr)
+                model = ransac_fit(X_arr, y_arr, min_samples=current_min_samples,
+                                   residual_threshold=float(current_threshold), max_trials=max_trials,
+                                   stop_probability=stop_probability, random_state=random_state)
             except ValueError:
                 continue
             model = stabilize_ransac_model(model, X_arr, y_arr, float(current_threshold))
@@ -713,11 +924,9 @@ def fixed_sequential_score(X, y, fitted_models, min_inliers, seed, max_trials=30
         if len(remaining) < max(min_inliers, fitted['min_samples'] + 1):
             break
         try:
-            model = RANSACRegressor(
-                estimator=LinearRegression(), min_samples=fitted['min_samples'],
-                residual_threshold=fitted['threshold'], max_trials=max_trials,
-                stop_probability=0.999, loss='absolute_error', random_state=seed + line
-            ).fit(X[remaining], y[remaining])
+            model = ransac_fit(X[remaining], y[remaining], min_samples=fitted['min_samples'],
+                               residual_threshold=fitted['threshold'], max_trials=max_trials,
+                               stop_probability=0.999, random_state=seed + line)
         except ValueError:
             break
         model = stabilize_ransac_model(model, X[remaining], y[remaining], fitted['threshold'])
@@ -756,7 +965,11 @@ def permutation_data(frame, descriptor, ycol=SORPTION_MMOL):
 def _run_parallel(func, seeds, progress: Callable | None, n_jobs=-1):
     total = len(seeds)
     results = np.empty(total)
-    gen = Parallel(n_jobs=n_jobs, return_as='generator')(delayed(func)(int(s)) for s in seeds)
+    if n_jobs == 1:
+        gen = (func(int(s)) for s in seeds)
+    else:
+        gen = Parallel(n_jobs=n_jobs, return_as='generator', batch_size='auto')(
+            delayed(func)(int(s)) for s in seeds)
     for i, value in enumerate(gen):
         results[i] = value
         if progress is not None and (i % 10 == 0 or i == total - 1):
@@ -765,7 +978,7 @@ def _run_parallel(func, seeds, progress: Callable | None, n_jobs=-1):
 
 
 def permutation_test(frame, descriptor, fitted_models, *, ycol=SORPTION_MMOL, n_permutations=1000,
-                     seed=42, mode='conditional', settings=None, progress=None, n_jobs=-1,
+                     seed=42, mode='conditional', settings=None, progress=None, n_jobs=None,
                      max_trials_null=300, min_fraction=0.20, min_floor=4):
     """Ячейка 82 (mode='conditional') и НОВОЕ полное повторение подбора (mode='full')."""
     X_d, y_s = permutation_data(frame, descriptor, ycol)
@@ -784,6 +997,8 @@ def permutation_test(frame, descriptor, fitted_models, *, ycol=SORPTION_MMOL, n_
 
         def one(s):
             return _full_sequential_score(X_d, np.random.default_rng(s).permutation(y_s), st, s)
+    if n_jobs is None:   # условный тест — доли миллисекунды на перестановку, процессы не нужны
+        n_jobs = 1 if mode == 'conditional' else -1
     null = _run_parallel(one, seeds, progress, n_jobs)
     p_value = (1 + np.sum(null >= observed)) / (n_permutations + 1)
     return {'observed': float(observed), 'null': null, 'p': float(p_value), 'n': n}
@@ -810,7 +1025,7 @@ def benjamini_hochberg(pvalues):
 # ---------------------------------------------------------------------------
 # Вложенная LOO-валидация PLS (ячейка 84) + НОВОЕ: y-рандомизация
 # ---------------------------------------------------------------------------
-def nested_loo_pls(X, y, seed=42, n_jobs=-1):
+def nested_loo_pls(X, y, seed=42, n_jobs=1):
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
     n_pred = X.shape[1]
@@ -834,6 +1049,7 @@ def nested_loo_pls(X, y, seed=42, n_jobs=-1):
 
 
 def pls_validation(frame, predictors, ycol=SORPTION_MMOL, seed=42):
+    # n_jobs=1: на 15–40 веществах запуск процессов дороже самого расчёта (результат тот же)
     col = collinearity(frame, predictors, ycol)
     data = col['data']
     if len(predictors) < 1 or len(data) < max(6, len(predictors) + 2):

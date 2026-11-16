@@ -14,7 +14,6 @@ from collections import OrderedDict
 import numpy as np
 import pandas as pd
 import streamlit as st
-from joblib import Parallel, delayed
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
 import analysis as A
@@ -168,13 +167,10 @@ def compute_many(tasks: dict) -> dict:
     store = _store()
     missing = [k for k in tasks if k not in store]
     if missing:
+        # После ускорения RANSAC (analysis.ransac_fit) один дескриптор считается за доли секунды,
+        # поэтому считаем подряд: запуск процессов joblib обошёлся бы дороже самого расчёта.
         with st.spinner(f'Считаю RANSAC ({len(missing)} расчёт(а/ов))…'):
-            if len(missing) == 1:
-                f, a, kw = tasks[missing[0]]
-                results = [f(*a, **kw)]
-            else:
-                results = Parallel(n_jobs=min(len(missing), N_CPU))(
-                    delayed(tasks[k][0])(*tasks[k][1], **tasks[k][2]) for k in missing)
+            results = [tasks[k][0](*tasks[k][1], **tasks[k][2]) for k in missing]
         for k, r in zip(missing, results):
             store[k] = r
         while len(store) > 400:
@@ -1252,11 +1248,13 @@ def page_validation():
     if sel:
         tc, tfull = time_estimate(frame, ycol, sel[0], res_all[sel[0]]['models'], rs)
         workers = max(1, N_CPU)
-        est = len(sel) * (n_cond * tc + n_full * tfull) / workers
+        # условный тест идёт в одном процессе, полный и y-рандомизация — на всех ядрах
+        est = len(sel) * (n_cond * tc + n_full * tfull / workers)
         if n_yr and pls is not None:
-            est += n_yr * 1.0 / workers
-        st.caption(f'Оценка времени на этом сервере ({N_CPU} ядер): ~{est / 60:.1f} мин. '
-                   f'Одна перестановка: условный тест ≈ {tc * 1000:.0f} мс, полный ≈ {tfull:.2f} с.')
+            est += n_yr * 0.3 / workers
+        est_txt = f'~{est:.0f} с' if est < 90 else f'~{est / 60:.1f} мин'
+        st.caption(f'Оценка времени на этом сервере ({N_CPU} ядер): {est_txt}. '
+                   f'Одна перестановка: условный тест ≈ {tc * 1000:.1f} мс, полный ≈ {tfull * 1000:.0f} мс.')
     run = st.button('▶️ Рассчитать', type='primary', disabled=not sel)
     stored = st.session_state.get('validation')
     if run:
