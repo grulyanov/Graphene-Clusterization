@@ -112,6 +112,8 @@ def line_styler(shown: pd.DataFrame, line_col='Line'):
             i = int(row[line_col]) - 1
         except (TypeError, ValueError):
             return [''] * len(row)
+        if i < 0:
+            return [''] * len(row)
         c = colors[i % len(colors)]
         return [f'background-color: {_rgba(c, 0.14)}'
                 + (f'; color: white; background-color: {c}; font-weight: 700' if col == line_col else '')
@@ -1145,8 +1147,11 @@ def lines_summary(res_all):
                          'Min_samples': m['min_samples'],
                          'Q_corr': m['r2'] * len(m['inliers_idx']) / len(r['data'])})
         if not r['models']:
-            rows.append({'Descriptor': d, 'Line': '—', 'n_inliers': 0, 'N_total': len(r['data'])})
-    return pd.DataFrame(rows)
+            rows.append({'Descriptor': d, 'Line': None, 'n_inliers': 0, 'N_total': len(r['data'])})
+    out = pd.DataFrame(rows)
+    if 'Line' in out:
+        out['Line'] = out['Line'].astype('Int64')   # пусто = прямых не найдено
+    return out
 
 
 def page_correlations():
