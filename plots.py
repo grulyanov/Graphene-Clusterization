@@ -29,6 +29,11 @@ def _colors():
     return mpl.rcParams['axes.prop_cycle'].by_key()['color']
 
 
+def line_colors():
+    """Цвета прямых RANSAC по порядку (палитра seaborn «deep», как в sns.set())."""
+    return sns.color_palette('deep').as_hex()
+
+
 def to_png(fig, dpi=600):
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')

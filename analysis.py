@@ -1078,3 +1078,48 @@ def y_randomization(frame, predictors, ycol=SORPTION_MMOL, n_permutations=100, s
     def one(s):
         return nested_loo_pls(X, np.random.default_rng(s).permutation(y), seed=seed, n_jobs=1)['q2']
     return _run_parallel(one, seeds, progress, n_jobs)
+
+
+# ---------------------------------------------------------------------------
+# НОВОЕ: метрики качества при каждом k — для подсказки «оптимально ли выбранное k»
+# ---------------------------------------------------------------------------
+def _metrics_row(X_scaled, labels, **extra):
+    row = dict(extra)
+    if 2 <= len(np.unique(labels)) < len(labels):
+        row.update({'Silhouette': silhouette_score(X_scaled, labels),
+                    'Calinski-Harabasz': calinski_harabasz_score(X_scaled, labels),
+                    'Davies-Bouldin': davies_bouldin_score(X_scaled, labels)})
+    else:
+        row.update({'Silhouette': np.nan, 'Calinski-Harabasz': np.nan, 'Davies-Bouldin': np.nan})
+    return row
+
+
+def k_scan(X_scaled, method, k_min=2, k_max=8, seed=42, linkage='ward', gamma=1.0):
+    """Силуэт, Калински–Харабаш и Дэвис–Болдин для каждого k (тот же алгоритм и параметры,
+    что и при окончательном расчёте)."""
+    rows = []
+    for k in _k_range(len(X_scaled), k_min, k_max):
+        try:
+            if method == 'kmeans':
+                labels, _ = fit_kmeans(X_scaled, k, seed)
+            elif method == 'hc':
+                labels = fit_hierarchical(X_scaled, k, linkage)
+            else:
+                labels = fit_spectral(X_scaled, k, gamma, seed)
+        except ValueError:
+            continue
+        rows.append(_metrics_row(X_scaled, labels, k=k))
+    return pd.DataFrame(rows)
+
+
+def k_recommendation(scan: pd.DataFrame):
+    """Лучшее k по каждой метрике и по правилу ноутбука (max силуэт, затем min DB)."""
+    ok = scan.dropna(subset=['Silhouette'])
+    if ok.empty:
+        return {}
+    best = {'Silhouette': int(ok.loc[ok['Silhouette'].idxmax(), 'k']),
+            'Calinski-Harabasz': int(ok.loc[ok['Calinski-Harabasz'].idxmax(), 'k']),
+            'Davies-Bouldin': int(ok.loc[ok['Davies-Bouldin'].idxmin(), 'k'])}
+    rule = max(zip(ok['Silhouette'], -ok['Davies-Bouldin'], ok['k']))
+    best['notebook'] = int(rule[2])
+    return best

@@ -97,8 +97,32 @@ def _safe(name):
     return keep.strip('_')[:80] or 'table'
 
 
-def show_table(df: pd.DataFrame, name: str, key: str, height='auto', round_to=4, **kwargs):
-    """Таблица с копированием (выделите ячейки и Ctrl/Cmd+C) и скачиванием CSV / Excel."""
+def _rgba(hex_color, alpha):
+    h = hex_color.lstrip('#')
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f'rgba({r}, {g}, {b}, {alpha})'
+
+
+def line_styler(shown: pd.DataFrame, line_col='Line'):
+    """Строки прямой подкрашены цветом этой прямой на графике, номер прямой — тем же цветом."""
+    colors = P.line_colors()
+
+    def style(row):
+        try:
+            i = int(row[line_col]) - 1
+        except (TypeError, ValueError):
+            return [''] * len(row)
+        c = colors[i % len(colors)]
+        return [f'background-color: {_rgba(c, 0.14)}'
+                + (f'; color: white; background-color: {c}; font-weight: 700' if col == line_col else '')
+                for col in row.index]
+    fmt = {c: '{:.4g}' for c in shown.select_dtypes(include='float').columns}
+    return shown.style.apply(style, axis=1).format(fmt, na_rep='')
+
+
+def show_table(df: pd.DataFrame, name: str, key: str, height='auto', round_to=4, line_col=None, **kwargs):
+    """Таблица с копированием (выделите ячейки и Ctrl/Cmd+C) и скачиванием CSV / Excel.
+    line_col — столбец с номером прямой RANSAC: строки раскрашиваются цветами прямых."""
     if df is None or len(df) == 0:
         st.caption('— таблица пуста —')
         return
@@ -106,7 +130,10 @@ def show_table(df: pd.DataFrame, name: str, key: str, height='auto', round_to=4,
     if round_to is not None:
         num = shown.select_dtypes(include='number').columns
         shown[num] = shown[num].round(round_to)
-    st.dataframe(shown, hide_index=True, height=height, width='stretch', **kwargs)
+    if line_col and line_col in shown.columns:
+        st.dataframe(line_styler(shown, line_col), hide_index=True, height=height, width='stretch', **kwargs)
+    else:
+        st.dataframe(shown, hide_index=True, height=height, width='stretch', **kwargs)
     c1 = c2 = st.container(horizontal=True)
     c1.download_button('⬇ CSV', data=lambda d=df: _csv_bytes(d), file_name=f'{_safe(name)}.csv',
                        mime='text/csv', key=f'csv_{key}', on_click='ignore')
@@ -725,6 +752,104 @@ def c_dbscan(Xs, eps, ms):
     return A.fit_dbscan(Xs, eps, ms)
 
 
+@st.cache_data(show_spinner=False, max_entries=200)
+def c_kscan(Xs, method, seed, linkage='ward', gamma=1.0, kmax=8):
+    return A.k_scan(Xs, method, k_max=kmax, seed=seed, linkage=linkage, gamma=gamma)
+
+
+def k_control(prefix, auto_k, kmax, toggle_label='Оптимальное k (как в ноутбуке)'):
+    """Переключатель «оптимальное k» + ползунок, который виден всегда."""
+    auto = st.toggle(toggle_label, True, key=f'{prefix}_auto', help=T['auto_k'])
+    key = f'{prefix}_k'
+    if auto or key not in st.session_state:
+        st.session_state[key] = int(min(auto_k, kmax))
+    st.session_state[key] = int(min(max(2, st.session_state[key]), kmax))
+    k = st.slider('Число кластеров k', 2, kmax, key=key, disabled=auto,
+                  help='Выключите переключатель выше, чтобы задать k вручную.') if kmax > 2 else 2
+    return int(k), auto
+
+
+def _scan_styler(scan, k):
+    rec = A.k_recommendation(scan)
+    best_rows = {'Silhouette': scan['Silhouette'].idxmax(), 'Calinski-Harabasz': scan['Calinski-Harabasz'].idxmax(),
+                 'Davies-Bouldin': scan['Davies-Bouldin'].idxmin()}
+
+    def style(row):
+        out = []
+        for col in row.index:
+            css = []
+            if row['k'] == k:
+                css.append('background-color: rgba(255, 196, 0, 0.28); font-weight: 600')
+            if col in best_rows and row.name == best_rows[col]:
+                css.append('background-color: rgba(46, 160, 67, 0.30); color: #136f2a; font-weight: 700')
+            if col == 'k' and row['k'] == rec.get('notebook'):
+                css.append('color: #136f2a; font-weight: 700')
+            out.append('; '.join(css))
+        return out
+    shown = scan.copy()
+    shown.insert(1, 'Выбрано', np.where(shown['k'] == k, '◀ выбрано', ''))
+    shown.insert(2, 'Оптимум', np.where(shown['k'] == rec.get('notebook'), '★ по правилу ноутбука', ''))
+    return shown.style.apply(style, axis=1).format(
+        {'Silhouette': '{:.3f}', 'Calinski-Harabasz': '{:.2f}', 'Davies-Bouldin': '{:.3f}'}, na_rep='—')
+
+
+def k_advice(scan, k, prefix, extra='', elbow=False):
+    """Подсказка: оптимально ли выбранное k по метрикам + цветная таблица метрик по всем k."""
+    if scan is None or scan.empty:
+        return
+    rec = A.k_recommendation(scan)
+    if not rec:
+        return
+    row = scan.loc[scan['k'] == k]
+    sil_k = float(row['Silhouette'].iloc[0]) if len(row) else float('nan')
+    best_k = rec['notebook']
+    sil_best = float(scan.loc[scan['k'] == best_k, 'Silhouette'].iloc[0])
+    agree = [name for name, key in (('силуэту', 'Silhouette'), ('Калински–Харабашу', 'Calinski-Harabasz'),
+                                    ('Дэвису–Болдину', 'Davies-Bouldin')) if rec[key] == k]
+    if k == best_k:
+        st.success(f'✅ k = {k} — оптимальное по правилу ноутбука (наибольший силуэт = {sil_k:.3f}).'
+                   + (f' Лучшее и по: {", ".join(agree)}.' if agree else '') + extra)
+    else:
+        lost = (1 - sil_k / sil_best) * 100 if sil_best else float('nan')
+        st.warning(f'⚠️ k = {k} — не оптимальное по силуэту: {sil_k:.3f} против {sil_best:.3f} при k = {best_k} '
+                   f'(хуже на {lost:.0f} %).'
+                   + (f' Зато k = {k} лучшее по: {", ".join(agree)}.' if agree else '')
+                   + ' Выбирать другое k можно, если оно лучше согласуется с химией веществ.' + extra)
+    st.caption(f'Лучшее k по каждой метрике: силуэт → **{rec["Silhouette"]}**, Калински–Харабаш → '
+               f'**{rec["Calinski-Harabasz"]}**, Дэвис–Болдин → **{rec["Davies-Bouldin"]}**'
+               + ('; «локоть» — на графике Elbow curve выше.' if elbow else '.'))
+    with st.expander('📊 Метрики при каждом k (зелёным — лучшее значение, жёлтым — выбранное k)'):
+        st.dataframe(_scan_styler(scan, k), hide_index=True, width='stretch')
+        c = st.columns(3)
+        with c[0]:
+            explain('silhouette', 'Силуэт')
+        with c[1]:
+            explain('ch', 'Калински–Харабаш')
+        with c[2]:
+            explain('db', 'Дэвис–Болдин')
+        show_table(scan, f'metrics_by_k_{prefix}', f'scan_{prefix}', round_to=4)
+
+
+def dbscan_advice(Xs, labels, eps, ms, best):
+    m = A.clustering_metrics(Xs, 'DBSCAN', labels, '', noise=True)
+    n_cl, noise = m['Clusters'], m['Noise_fraction']
+    if best is None:
+        st.info(f'Кластеров: {n_cl}, шум: {noise:.0%}.')
+        return
+    score_best, sil_best, negnoise, beps, bms = best
+    if np.isnan(m['Silhouette']):
+        st.warning(f'⚠️ При eps = {eps}, min_samples = {ms} получилось кластеров: {n_cl} — метрики не считаются. '
+                   f'Оптимум по правилу ноутбука: eps = {beps}, min_samples = {bms}.')
+        return
+    score = m['Silhouette'] - 0.20 * noise
+    if (eps, ms) == (beps, bms):
+        st.success(f'✅ eps = {eps}, min_samples = {ms} — оптимальные по правилу ноутбука '
+                   f'(силуэт − 0.2·доля шума = {score:.3f}). Кластеров: {n_cl}, шум: {noise:.0%}.')
+    else:
+        st.warning(f'⚠️ Оценка силуэт − 0.2·доля шума = {score:.3f} против {score_best:.3f} при оптимуме '
+                   f'eps = {beps}, min_samples = {bms}. Сейчас кластеров: {n_cl}, шум: {noise:.0%}.')
+
+
 def cand_table(rows, cols):
     df = pd.DataFrame(rows, columns=cols)
     for c in df.columns:
@@ -768,6 +893,9 @@ def page_clustering():
         show_fig(P.elbow(*cand['elbow']), 'elbow', 'elbow', 900)
 
     results = {}
+    st.info('🎛️ Число кластеров можно менять у каждого метода: выключите переключатель «Оптимальное …» '
+            'и двигайте ползунок. Все графики, таблицы, метрики и число графиков RANSAC внутри '
+            'кластеров ниже пересчитаются. Под ползунком — подсказка, оптимален ли выбор по метрикам.')
     tabs = st.tabs(['K-Means', 'Иерархическая', 'Спектральная', 'DBSCAN'])
     # ---- K-Means
     with tabs[0]:
@@ -776,18 +904,14 @@ def page_clustering():
             st.error('Слишком мало веществ для k-средних.')
         else:
             auto_k = max(cand['kmeans'])[2]
-            if st.checkbox('Автоматический выбор k (как в ноутбуке)', True, key='km_auto', help=T['auto_k']):
-                k = auto_k
-            else:
-                k = st.slider('Число кластеров k', 2, kmax, min(auto_k, kmax), key='km_k')
+            k, _ = k_control('km', auto_k, kmax)
+            scan = c_kscan(Xs, 'kmeans', seed, kmax=kmax)
+            k_advice(scan, k, 'km', elbow=True)
             labels, centers = c_kmeans(Xs, k, seed)
             results['K-Means'] = (labels, f'k={k}', False)
             show_fig(P.cluster_scatter(X, labels, 'K-Means', yaxis, xlab,
                                        centers=StandardScaler().fit(X).inverse_transform(centers)),
                      'kmeans_clusters', 'km', 800)
-            with st.expander('Перебор k: силуэт и Дэвис–Болдин'):
-                show_table(cand_table(cand['kmeans'], ['Silhouette', '−Davies-Bouldin', 'k']),
-                           'kmeans_candidates', 'kmc')
     # ---- Hierarchical
     with tabs[1]:
         explain('hierarchical')
@@ -796,58 +920,67 @@ def page_clustering():
             st.error('Слишком мало веществ для иерархической кластеризации.')
         else:
             _, _, auto_k, auto_link = max(cand['hc'])
-            if st.checkbox('Автоматический выбор k и linkage (как в ноутбуке)', True, key='hc_auto',
-                           help=T['auto_k']):
-                k, link = auto_k, auto_link
-            else:
-                c1, c2 = st.columns(2)
-                k = c1.slider('Число кластеров k', 2, kmax, min(auto_k, kmax), key='hc_k')
-                link = c2.selectbox('linkage', ['ward', 'complete', 'average'],
-                                    index=['ward', 'complete', 'average'].index(auto_link), key='hc_link')
+            links = ['ward', 'complete', 'average']
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                k, auto = k_control('hc', auto_k, kmax, 'Оптимальные k и linkage (как в ноутбуке)')
+            if auto:
+                st.session_state['hc_link'] = auto_link
+            elif 'hc_link' not in st.session_state:
+                st.session_state['hc_link'] = auto_link
+            link = c2.selectbox('linkage', links, key='hc_link', disabled=auto)
+            scan = c_kscan(Xs, 'hc', seed, linkage=link, kmax=kmax)
+            note = '' if link == auto_link else (f' Лучший linkage по правилу ноутбука — **{auto_link}** '
+                                                 f'(k = {auto_k}); сейчас выбран {link}.')
+            k_advice(scan, k, 'hc', extra=note)
             labels = c_hc(Xs, k, link)
             results['Hierarchical'] = (labels, f'k={k}, linkage={link}', False)
             Z, leaves = A.dendrogram_linkage(data[A.NAME], X, link)
             show_fig(P.dendrogram(Z, leaves, A.dendrogram_threshold(Z, k, len(leaves))), 'dendrogram', 'dend', 1000)
             st.caption('Цвет подписей — группы из ноутбука (auto_group): красный — кислородсодержащие, '
                        'синий — азотсодержащие, оранжевый — серосодержащие, розовый — фосфорсодержащие, '
-                       'чёрный — прочие.')
+                       'чёрный — прочие. Цвет ветвей показывает разрез дерева на k кластеров.')
             show_fig(P.cluster_scatter(X, labels, 'Hierarchical', yaxis, xlab), 'hierarchical_clusters', 'hc', 800)
-            with st.expander('Перебор linkage × k'):
+            with st.expander('Перебор linkage × k (как в ноутбуке)'):
                 show_table(cand_table(cand['hc'], ['Silhouette', '−Davies-Bouldin', 'k', 'linkage']),
                            'hierarchical_candidates', 'hcc')
     # ---- Spectral
     with tabs[2]:
         explain('spectral')
         explain('gamma', 'Что такое γ?')
-        Aff, sigma = A.adjacency_matrix(Xs)
-        explain('adjacency', 'Как читать гистограмму матрицы смежности?')
-        show_fig(P.adjacency_hist(Aff), 'adjacency_hist', 'adj', 1100)
-        if n >= 3:
-            ev, gaps, egk = A.laplacian_eigenvalues(Aff)
-            explain('eigen', 'Как читать собственные значения?')
-            show_fig(P.laplacian(ev), 'laplacian_eigenvalues', 'lap', 900)
-            if len(gaps):
-                st.caption(f'Eigengap подсказывает k = {egk}.')
-                show_table(pd.DataFrame({'Number of clusters': np.arange(2, 2 + len(gaps)),
-                                         'Difference between Eigenvalues': gaps}).T.reset_index(),
-                           'eigengap', 'eg')
         if not cand['spectral']:
             st.error('Спектральная кластеризация не нашла допустимого разбиения.')
         else:
             _, _, auto_k, auto_g = max(cand['spectral'])
-            if st.checkbox('Автоматический выбор k и γ (как в ноутбуке)', True, key='sp_auto', help=T['auto_k']):
-                k, gamma = auto_k, auto_g
-            else:
-                c1, c2 = st.columns(2)
-                k = c1.slider('Число кластеров k', 2, kmax, min(auto_k, kmax), key='sp_k')
-                gamma = c2.select_slider('γ', list(A.SPECTRAL_GAMMAS), auto_g, key='sp_g')
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                k, auto = k_control('sp', auto_k, kmax, 'Оптимальные k и γ (как в ноутбуке)')
+            if auto or 'sp_g' not in st.session_state:
+                st.session_state['sp_g'] = auto_g
+            gamma = c2.select_slider('γ', list(A.SPECTRAL_GAMMAS), key='sp_g', disabled=auto)
+            scan = c_kscan(Xs, 'spectral', seed, gamma=gamma, kmax=kmax)
+            note = '' if gamma == auto_g else (f' Лучшее γ по правилу ноутбука — **{auto_g}** (k = {auto_k}); '
+                                               f'сейчас γ = {gamma}.')
+            k_advice(scan, k, 'sp', extra=note)
             labels = c_spectral(Xs, k, gamma, seed)
             results['Spectral'] = (labels, f'k={k}, gamma={gamma}', False)
             show_fig(P.cluster_scatter(X, labels, 'Spectral Clustering', yaxis, xlab), 'spectral_clusters', 'sp', 800)
-            with st.expander('Перебор γ × k'):
+            with st.expander('Перебор γ × k (как в ноутбуке)'):
                 show_table(cand_table(cand['spectral'], ['Silhouette', '−Davies-Bouldin', 'k', 'gamma']),
                            'spectral_candidates', 'spc')
-        with st.expander('Подбор ширины ядра: StandardScaler и RobustScaler (ячейки 49–52)'):
+        Aff, sigma = A.adjacency_matrix(Xs)
+        with st.expander('Диагностика: матрица смежности и собственные значения лапласиана'):
+            explain('adjacency', 'Как читать гистограмму матрицы смежности?')
+            show_fig(P.adjacency_hist(Aff), 'adjacency_hist', 'adj', 1100)
+            if n >= 3:
+                ev, gaps, egk = A.laplacian_eigenvalues(Aff)
+                explain('eigen', 'Как читать собственные значения?')
+                show_fig(P.laplacian(ev), 'laplacian_eigenvalues', 'lap', 900)
+                if len(gaps):
+                    st.caption(f'Eigengap подсказывает k = {egk}.')
+                    show_table(pd.DataFrame({'Number of clusters': np.arange(2, 2 + len(gaps)),
+                                             'Difference between Eigenvalues': gaps}).T.reset_index(),
+                               'eigengap', 'eg')
             show_fig(P.adjacency_hist(A.adjacency_matrix(StandardScaler().fit_transform(X))[0],
                                       'Adjacency Matrix Value Distribution tuned by median heuristic (Standart Scaler)',
                                       (15, 5)), 'adjacency_standard', 'adjs', 1200)
@@ -862,24 +995,28 @@ def page_clustering():
             explain('eps', 'Что такое eps?')
         with c2:
             explain('min_samples', 'Что такое min_samples?')
+        st.caption('У DBSCAN число кластеров не задаётся напрямую: оно получается из eps и min_samples.')
         if cand['dbscan']:
-            _, _, _, auto_eps, auto_ms = max(cand['dbscan'])
+            best_db = max(cand['dbscan'])
+            _, _, _, auto_eps, auto_ms = best_db
         else:
+            best_db = None
             auto_eps, auto_ms = 0.5, 4
             st.warning('Автоматический перебор не нашёл допустимого варианта (≥ 2 кластера, шум ≤ 45 %, '
                        'в каждом кластере ≥ 2 точки). Задайте параметры вручную.')
-        auto = st.checkbox('Автоматический выбор eps и min_samples (как в ноутбуке)', bool(cand['dbscan']),
-                           key='db_auto', help=T['auto_k'])
-        if auto and cand['dbscan']:
-            eps, ms = auto_eps, auto_ms
-        else:
-            c1, c2 = st.columns(2)
-            eps = c1.select_slider('eps', list(A.DBSCAN_EPS_GRID), float(auto_eps), key='db_eps')
-            ms = c2.slider('min_samples', 2, 12, int(auto_ms), key='db_ms')
+        auto = st.toggle('Оптимальные eps и min_samples (как в ноутбуке)', bool(cand['dbscan']), key='db_auto',
+                         help=T['auto_k'], disabled=not cand['dbscan'])
+        if (auto and cand['dbscan']) or 'db_eps' not in st.session_state:
+            st.session_state['db_eps'] = float(auto_eps)
+            st.session_state['db_ms'] = int(auto_ms)
+        c1, c2 = st.columns(2)
+        eps = c1.select_slider('eps', list(A.DBSCAN_EPS_GRID), key='db_eps', disabled=auto)
+        ms = c2.slider('min_samples', 2, 12, key='db_ms', disabled=auto)
         labels = c_dbscan(Xs, eps, ms)
         results['DBSCAN'] = (labels, f'eps={eps}, min_samples={ms}', True)
+        dbscan_advice(Xs, labels, eps, ms, best_db)
         show_fig(P.cluster_scatter(X, labels, 'DBSCAN', yaxis, xlab), 'dbscan_clusters', 'db', 800)
-        with st.expander('Перебор eps × min_samples'):
+        with st.expander('Перебор eps × min_samples (как в ноутбуке)'):
             show_table(pd.DataFrame(cand['dbscan'], columns=['Score = silhouette − 0.2·noise', 'Silhouette',
                                                             '−Noise_fraction', 'eps', 'min_samples']),
                        'dbscan_candidates', 'dbc')
@@ -955,6 +1092,8 @@ def page_clustering():
         if not groups:
             st.caption('Нет кластеров для анализа.')
             continue
+        st.caption(f'Графиков: {len(groups)} — по одному на каждый кластер ({results[m][1]}). '
+                   'Цвет строки в таблице inliers совпадает с цветом прямой на графике.')
         show_fig(P.cluster_ransac(groups, m, xlab, yaxis, ci_level=ci_level(), tau_factor=tf),
                  f'{m}_cluster_ransac', f'cr_{m}', 1400)
         inl = [g['inliers'] for g in groups if not g['inliers'].empty]
@@ -963,7 +1102,7 @@ def page_clustering():
         with c1:
             st.markdown('Inliers (на прямых)')
             show_table(pd.concat(inl, ignore_index=True) if inl else pd.DataFrame(), f'{m}_cluster_inliers',
-                       f'cri_{m}')
+                       f'cri_{m}', line_col='Line')
         with c2:
             st.markdown('Outliers (вне прямых)')
             show_table(pd.concat(outl, ignore_index=True) if outl else pd.DataFrame(), f'{m}_cluster_outliers',
@@ -1030,7 +1169,7 @@ def page_correlations():
                'дескриптора «рост усиливает связывание» (вкладка «Данные»).')
     res_all = ransac_all(frame, used)
     st.markdown('**Сводка по всем прямым**')
-    show_table(lines_summary(res_all), 'ransac_lines_summary', 'lines')
+    show_table(lines_summary(res_all), 'ransac_lines_summary', 'lines', line_col='Line')
     explain('q_corr', 'Что такое Q_corr и C_corr?')
 
     st.markdown('#### Два дескриптора рядом (как ячейка 57 ноутбука)')
@@ -1074,7 +1213,7 @@ def page_correlations():
             c1, c2 = st.columns([3, 2])
             with c1:
                 st.markdown('Inliers (на прямых)')
-                show_table(r.get('inliers', pd.DataFrame()), f'inliers_{d}', f'ri_{d}')
+                show_table(r.get('inliers', pd.DataFrame()), f'inliers_{d}', f'ri_{d}', line_col='Line')
             with c2:
                 st.markdown('Outliers (вне прямых)')
                 show_table(r.get('outliers', pd.DataFrame()), f'outliers_{d}', f'ro_{d}')
