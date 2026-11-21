@@ -1324,6 +1324,20 @@ def _unit_times():
     return {}
 
 
+def pls_time_estimate(frame, ycol, base, seed):
+    """Замер одной вложенной LOO-валидации PLS (= одна перестановка y-рандомизации)."""
+    store = _unit_times()
+    key = ('pls', fhash(frame[[ycol] + list(base)], seed))
+    if key not in store:
+        col = A.collinearity(frame, base, ycol)
+        data = col['data']
+        t0 = time.time()
+        if len(data) >= max(6, len(base) + 2):
+            A.nested_loo_pls(data[list(base)].to_numpy(float), data[ycol].to_numpy(float), seed=seed)
+        store[key] = time.time() - t0
+    return store[key]
+
+
 def time_estimate(frame, ycol, d, models, rs):
     """Замер одной перестановки каждого типа (один раз на конфигурацию)."""
     store = _unit_times()
@@ -1421,7 +1435,7 @@ def page_validation():
         # условный тест идёт в одном процессе, полный и y-рандомизация — на всех ядрах
         est = len(sel) * (n_cond * tc + n_full * tfull / workers)
         if n_yr and pls is not None:
-            est += n_yr * 0.3 / workers
+            est += n_yr * pls_time_estimate(frame, ycol, base, seed) / workers
         est_txt = f'~{est:.0f} с' if est < 90 else f'~{est / 60:.1f} мин'
         st.caption(f'Оценка времени на этом сервере (параллельных процессов: {N_WORKERS}): {est_txt}. '
                    f'Одна перестановка: условный тест ≈ {tc * 1000:.1f} мс, полный ≈ {tfull * 1000:.0f} мс.')

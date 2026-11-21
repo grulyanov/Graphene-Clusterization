@@ -1358,6 +1358,20 @@ def _unit_times():
     return {}
 
 
+def pls_time_estimate(frame, ycol, base, seed):
+    """Time one nested LOO PLS validation (= one y-randomisation permutation)."""
+    store = _unit_times()
+    key = ('pls', fhash(frame[[ycol] + list(base)], seed))
+    if key not in store:
+        col = A.collinearity(frame, base, ycol)
+        data = col['data']
+        t0 = time.time()
+        if len(data) >= max(6, len(base) + 2):
+            A.nested_loo_pls(data[list(base)].to_numpy(float), data[ycol].to_numpy(float), seed=seed)
+        store[key] = time.time() - t0
+    return store[key]
+
+
 def time_estimate(frame, ycol, d, models, rs):
     """Time one permutation of each kind (once per configuration)."""
     store = _unit_times()
@@ -1455,7 +1469,7 @@ def page_validation():
 
         est = len(sel) * (n_cond * tc + n_full * tfull / workers)
         if n_yr and pls is not None:
-            est += n_yr * 0.3 / workers
+            est += n_yr * pls_time_estimate(frame, ycol, base, seed) / workers
         est_txt = f'~{est:.0f} s' if est < 90 else f'~{est / 60:.1f} min'
         st.caption(f'Estimated time on this server (parallel workers: {N_WORKERS}): {est_txt}. '
                    f'One permutation: conditional ≈ {tc * 1000:.1f} ms, full ≈ {tfull * 1000:.0f} ms.')

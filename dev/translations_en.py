@@ -402,4 +402,5 @@ TR = {
     "'Раздел'": "'Section'",
     '"""Закрыть процессы joblib после тяжёлого расчёта, чтобы они не держали память."""': '"""Shut down joblib worker processes after a heavy run so they release memory."""',
     'Оценка времени на этом сервере (параллельных процессов: ': 'Estimated time on this server (parallel workers: ',
+    '"""Замер одной вложенной LOO-валидации PLS (= одна перестановка y-рандомизации)."""': '"""Time one nested LOO PLS validation (= one y-randomisation permutation)."""',
 }
