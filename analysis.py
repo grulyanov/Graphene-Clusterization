@@ -431,7 +431,7 @@ def _subsets(n, k, random_state, count):
     if entry is None:
         entry = [np.empty((0, k), dtype=np.intp), np.random.RandomState(random_state)]
         _SUBSETS[key] = entry
-        while len(_SUBSETS) > 256:
+        while len(_SUBSETS) > 64:
             _SUBSETS.popitem(last=False)
     else:
         _SUBSETS.move_to_end(key)
@@ -974,6 +974,9 @@ def permutation_data(frame, descriptor, ycol=SORPTION_MMOL):
 def _run_parallel(func, seeds, progress: Callable | None, n_jobs=-1):
     total = len(seeds)
     results = np.empty(total)
+    if n_jobs is None or n_jobs < 0:   # не больше 4 процессов: каждый занимает ~0.1–0.2 ГБ памяти
+        from joblib import cpu_count
+        n_jobs = max(1, min(4, cpu_count()))
     if n_jobs == 1:
         gen = (func(int(s)) for s in seeds)
     else:

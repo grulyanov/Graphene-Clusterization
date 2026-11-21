@@ -44,6 +44,22 @@ def _effective_cpus():
 
 
 N_CPU = _effective_cpus()
+# Сколько процессов можно запускать для перестановочных тестов. Замер (dev/memory_check.py):
+# основной процесс ~0.25 ГБ, 2 процесса joblib ещё ~0.5 ГБ, 16 процессов ~3.4 ГБ. На бесплатном
+# Streamlit Cloud ~1 ГБ памяти, а os/joblib видят 16 ядер машины, поэтому параллельный расчёт
+# убивал сайт (Error running app / 502). На Streamlit Cloud (код лежит в /mount/src) считаем
+# в одном процессе; локально — до 4 процессов. SITE_MAX_WORKERS переопределяет.
+_ON_CLOUD = str(os.path.abspath(__file__)).startswith('/mount/src')
+N_WORKERS = max(1, min(N_CPU, int(os.environ.get('SITE_MAX_WORKERS', 1 if _ON_CLOUD else 4))))
+
+
+def _free_workers():
+    """Закрыть процессы joblib после тяжёлого расчёта, чтобы они не держали память."""
+    try:
+        from joblib.externals.loky import get_reusable_executor
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
 PAGES = ['📋 Данные', '🧩 Кластеризация', '📈 Корреляции', '✅ Валидация']
 
 
@@ -212,7 +228,7 @@ def compute_many(tasks: dict) -> dict:
             results = [tasks[k][0](*tasks[k][1], **tasks[k][2]) for k in missing]
         for k, r in zip(missing, results):
             store[k] = r
-        while len(store) > 400:
+        while len(store) > 150:
             store.popitem(last=False)
     return {k: store[k] for k in tasks}
 
@@ -1394,20 +1410,20 @@ def page_validation():
                          default=[d for d in with_lines], key='perm_desc')
     c1, c2, c3 = st.columns(3)
     n_cond = c1.slider('Перестановок, условный тест', 100, 2000, 2000, 100, key='n_cond')
-    n_full = c2.slider('Перестановок, полный тест (0 — не считать)', 0, 2000, 200, 50, key='n_full')
+    n_full = c2.slider('Перестановок, полный тест (0 — не считать)', 0, 2000, 100, 50, key='n_full')
     n_yr = c3.slider('Перестановок, y-рандомизация PLS (0 — не считать)', 0, 1000, 100, 50, key='n_yr')
     rs = ransac_settings()
     inputs_hash = fhash(frame, ycol, sel, n_cond, n_full, n_yr, rs, base,
                         [is_positive(d) for d in sel])
     if sel:
         tc, tfull = time_estimate(frame, ycol, sel[0], res_all[sel[0]]['models'], rs)
-        workers = max(1, N_CPU)
+        workers = N_WORKERS
         # условный тест идёт в одном процессе, полный и y-рандомизация — на всех ядрах
         est = len(sel) * (n_cond * tc + n_full * tfull / workers)
         if n_yr and pls is not None:
             est += n_yr * 0.3 / workers
         est_txt = f'~{est:.0f} с' if est < 90 else f'~{est / 60:.1f} мин'
-        st.caption(f'Оценка времени на этом сервере ({N_CPU} ядер): {est_txt}. '
+        st.caption(f'Оценка времени на этом сервере (параллельных процессов: {N_WORKERS}): {est_txt}. '
                    f'Одна перестановка: условный тест ≈ {tc * 1000:.1f} мс, полный ≈ {tfull * 1000:.0f} мс.')
     run = st.button('▶️ Рассчитать', type='primary', disabled=not sel)
     stored = st.session_state.get('validation')
@@ -1423,15 +1439,17 @@ def page_validation():
                        require_positive=is_positive(d), tau_grid=rs['tau_grid'], threshold=rs['threshold'])
             r = A.permutation_test(frame, d, res_all[d]['models'], ycol=ycol, n_permutations=nperm, seed=seed,
                                    mode=mode, settings=st_, progress=prog, min_fraction=rs['min_fraction'],
-                                   min_floor=rs['min_floor'])
+                                   min_floor=rs['min_floor'], n_jobs=1 if mode == 'conditional' else N_WORKERS)
             out['cond' if mode == 'conditional' else 'full'][d] = r
         if n_yr and pls is not None:
             def prog(f):
                 bar.progress(min(1.0, (len(jobs) + f) / (len(jobs) + 1)), text=f'y-рандомизация PLS ({int(f * 100)} %)')
-            null = A.y_randomization(frame[[A.NAME, ycol] + base], base, ycol, n_yr, seed, progress=prog)
+            null = A.y_randomization(frame[[A.NAME, ycol] + base], base, ycol, n_yr, seed, progress=prog,
+                                     n_jobs=N_WORKERS)
             out['yr'] = {'null': null, 'observed': pls['q2'],
                          'p': float((1 + np.sum(null >= pls['q2'])) / (n_yr + 1))}
         bar.empty()
+        _free_workers()
         st.session_state.validation = out
         stored = out
     if not stored:

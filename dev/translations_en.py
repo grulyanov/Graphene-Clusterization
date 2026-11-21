@@ -400,4 +400,6 @@ TR = {
     "'Сорбция молекулярных зондов на оксиде графена'": "'Sorption of molecular probes on graphene oxide'",
     "'ℹ️ Как пользоваться сайтом'": "'ℹ️ How to use'",
     "'Раздел'": "'Section'",
+    '"""Закрыть процессы joblib после тяжёлого расчёта, чтобы они не держали память."""': '"""Shut down joblib worker processes after a heavy run so they release memory."""',
+    'Оценка времени на этом сервере (параллельных процессов: ': 'Estimated time on this server (parallel workers: ',
 }
